@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>Coretax Scraper</title>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <div>
+          <h1>Coretax Scraper</h1>
+          <span class="subtitle">Faktur Pajak Keluaran</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="status-section">
+      <div id="status-badge" class="badge badge-idle">
+        <span class="badge-dot"></span>
+        <span id="status-text">Siap</span>
+      </div>
+    </div>
+
+    <!-- Info: must be on correct page -->
+    <div id="info-box" class="info-box">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 110 2 1 1 0 010-2zm1 3v4a1 1 0 01-2 0V7a1 1 0 012 0z"/>
+      </svg>
+      <span>Buka halaman <strong>Faktur Pajak Keluaran</strong> di Coretax terlebih dahulu.</span>
+    </div>
+
+    <!-- Hint: load data first -->
+    <div id="hint-box" class="hint-box hidden">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 110 2 1 1 0 010-2zm1 3v4a1 1 0 01-2 0V7a1 1 0 012 0z"/>
+      </svg>
+      <span>Pastikan data sudah dimuat — klik tombol <strong>Cari/Refresh</strong> di halaman terlebih dahulu.</span>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls">
+      <button id="btn-scrape" class="btn btn-primary" disabled>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 9h12M9 3l6 6-6 6"/>
+        </svg>
+        Mulai Scrape
+      </button>
+    </div>
+
+    <!-- Progress (hidden initially) -->
+    <div id="progress-section" class="hidden">
+      <div class="stats-row">
+        <div class="stat">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">Data</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-pages">0</span>
+          <span class="stat-label">Halaman</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-time">0s</span>
+          <span class="stat-label">Waktu</span>
+        </div>
+      </div>
+      <div class="progress-text" id="progress-text">Menunggu...</div>
+    </div>
+
+    <!-- Export (hidden initially) -->
+    <div id="export-section" class="hidden">
+      <div class="divider"></div>
+      <div class="export-buttons">
+        <button id="btn-csv" class="btn btn-export">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2v8m0 0L5 7m3 3l3-3M3 12v1a1 1 0 001 1h8a1 1 0 001-1v-1"/>
+          </svg>
+          Export CSV
+        </button>
+        <button id="btn-json" class="btn btn-export">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2v8m0 0L5 7m3 3l3-3M3 12v1a1 1 0 001 1h8a1 1 0 001-1v-1"/>
+          </svg>
+          Export JSON
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
