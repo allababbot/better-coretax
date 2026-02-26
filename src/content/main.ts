@@ -4,10 +4,21 @@
 // Runs in ISOLATED world (has access to browser.runtime API).
 // Injects scraper.ts (compiled) into the page's MAIN world.
 // Relays messages: popup ↔ content.js ↔ scraper.js (page context)
+// Also handles in-page export button UI events.
 // Stores scrape state so popup can reconnect after being closed.
 // ============================================================
 
-import { injectBadge } from "./ui";
+import { type ExportData, exportCSV, exportJSON } from "./exporter";
+import {
+	injectBadge,
+	injectExportButton,
+	isOutputTaxPage,
+	removeExportButton,
+	updatePanelComplete,
+	updatePanelError,
+	updatePanelIdle,
+	updatePanelProgress,
+} from "./ui";
 
 console.log("better coretax aktif");
 
@@ -28,6 +39,9 @@ interface ScrapeState {
 // ── State storage (persists while page is open) ─────
 
 let lastState: ScrapeState | null = null;
+let isRunning = false;
+let scrapedData: Record<string, unknown>[] | null = null;
+let scrapedFields: string[] | null = null;
 
 // ── SPA Detection ───────────────────────────────────
 
@@ -37,7 +51,7 @@ const observer = new MutationObserver(() => {
 	if (url !== lastUrl) {
 		lastUrl = url;
 		console.log("Better Coretax: URL changed to", url);
-		init();
+		onNavigate();
 	}
 });
 
@@ -76,6 +90,7 @@ browser.runtime.onMessage.addListener(
 		if (msg.type === "START_SCRAPE" || msg.type === "STOP_SCRAPE") {
 			window.postMessage({ ...msg, direction: "FROM_CONTENT" }, "*");
 			if (msg.type === "START_SCRAPE") {
+				isRunning = true;
 				lastState = {
 					type: "SCRAPE_PROGRESS",
 					total: 0,
@@ -97,7 +112,7 @@ browser.runtime.onMessage.addListener(
 	},
 );
 
-// ── Relay: Page → Content → Popup ───────────────────
+// ── Relay: Page → Content → Popup + In-page panel ───
 
 window.addEventListener("message", (event: MessageEvent) => {
 	if (event.source !== window) return;
@@ -114,16 +129,104 @@ window.addEventListener("message", (event: MessageEvent) => {
 		lastState = cleanMsg as ScrapeState;
 	}
 
+	// Update in-page panel
+	if (cleanMsg.type === "SCRAPE_PROGRESS") {
+		updatePanelProgress(
+			cleanMsg.total || 0,
+			cleanMsg.page || 0,
+			cleanMsg.elapsed || "0s",
+			cleanMsg.status || "",
+		);
+	}
+
+	if (cleanMsg.type === "SCRAPE_COMPLETE") {
+		isRunning = false;
+		scrapedData = cleanMsg.data || null;
+		scrapedFields = cleanMsg.fields || null;
+		updatePanelComplete(
+			cleanMsg.total || 0,
+			cleanMsg.pages || 0,
+			cleanMsg.elapsed || "0s",
+		);
+	}
+
+	if (cleanMsg.type === "SCRAPE_ERROR") {
+		isRunning = false;
+		updatePanelError(cleanMsg.message || "Error");
+	}
+
 	// Forward to popup
 	sendToPopup(cleanMsg);
 });
 
-// ── Init ────────────────────────────────────────────
+// ── In-page button events ───────────────────────────
+
+document.addEventListener("ch:scrape-toggle", () => {
+	if (isRunning) {
+		// Stop
+		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, "*");
+		isRunning = false;
+		updatePanelIdle();
+	} else {
+		startScrape();
+	}
+});
+
+// Auto-start scrape (only starts if not already running, never stops)
+document.addEventListener("ch:scrape-start", () => {
+	if (isRunning) return; // Already running, don't restart
+	startScrape();
+});
+
+function startScrape(): void {
+	isRunning = true;
+	scrapedData = null;
+	scrapedFields = null;
+	lastState = {
+		type: "SCRAPE_PROGRESS",
+		total: 0,
+		page: 0,
+		elapsed: "0s",
+		status: "Menunggu...",
+	};
+	updatePanelProgress(0, 0, "0s", "Menangkap request dari Angular...");
+	window.postMessage({ type: "START_SCRAPE", direction: "FROM_CONTENT" }, "*");
+}
+
+document.addEventListener("ch:export", ((e: CustomEvent<string>) => {
+	if (!scrapedData || !scrapedFields) return;
+
+	if (e.detail === "csv") {
+		const exportData: ExportData = {
+			data: scrapedData,
+			fields: scrapedFields,
+		};
+		exportCSV(exportData);
+	} else if (e.detail === "json") {
+		exportJSON(scrapedData);
+	}
+}) as EventListener);
+
+// ── Init & Navigation ───────────────────────────────
+
+function onNavigate(): void {
+	if (isOutputTaxPage()) {
+		injectBadge();
+		injectScraper();
+		injectExportButton();
+	} else {
+		removeExportButton();
+	}
+}
 
 function init(): void {
 	console.log("Better Coretax: Initializing on page...", window.location.href);
 	injectBadge();
 	injectScraper();
+
+	if (isOutputTaxPage()) {
+		injectExportButton();
+	}
 }
 
 if (document.readyState === "complete") {

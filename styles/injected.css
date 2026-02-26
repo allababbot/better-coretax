@@ -1,3 +1,5 @@
+/* ── Better Coretax Badge ────────────────────────── */
+
 #ch-badge {
   transition: transform 0.2s, background-color 0.2s;
 }
@@ -9,4 +11,200 @@
 
 #ch-badge:active {
   transform: scale(0.95);
+}
+
+/* ── Export Button in Toolbar ────────────────────── */
+
+#ch-export-btn {
+  background-color: #1565c0 !important;
+  border-color: #1565c0 !important;
+  color: #fff !important;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+#ch-export-btn:hover {
+  background-color: #0d47a1 !important;
+  box-shadow: 0 2px 8px rgba(13, 71, 161, 0.4);
+}
+
+#ch-export-btn:active {
+  background-color: #0a3d8f !important;
+}
+
+/* ── Export Dropdown Panel ───────────────────────── */
+
+.ch-export-panel {
+  position: fixed;
+  z-index: 99999;
+  width: 320px;
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #e2e8f0;
+  display: none;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.ch-export-panel.ch-panel-open {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Panel Header */
+.ch-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2d3548;
+}
+
+.ch-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.ch-panel-close {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+
+.ch-panel-close:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* Panel Body */
+.ch-panel-body {
+  padding: 12px 14px;
+}
+
+/* Status Text */
+.ch-status-text {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+/* Progress Row */
+.ch-progress-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: rgba(96, 165, 250, 0.06);
+  border-radius: 6px;
+  border: 1px solid rgba(96, 165, 250, 0.12);
+}
+
+.ch-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.ch-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.ch-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.5px;
+}
+
+/* Buttons */
+.ch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.1s;
+}
+
+.ch-btn:active {
+  transform: scale(0.98);
+}
+
+.ch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ch-btn-primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+}
+
+.ch-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.ch-btn-stop {
+  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  color: #fff !important;
+}
+
+.ch-btn-stop:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+}
+
+/* Export Buttons Row */
+.ch-export-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ch-btn-export {
+  flex: 1;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  font-size: 12px;
+}
+
+.ch-btn-export:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+/* Utility */
+.ch-hidden {
+  display: none !important;
+}
+
+/* Spin animation */
+@keyframes ch-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ch-spin {
+  animation: ch-spin 1s linear infinite;
 }
