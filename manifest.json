@@ -1,0 +1,41 @@
+{
+  "manifest_version": 2,
+  "name": "Better Coretax",
+  "version": "1.0.0",
+  "description": "Helper for Coretax DJP",
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "scripts": ["background/background.js"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://coretaxdjp.pajak.go.id/*"],
+      "js": ["content/main.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    "content/scraper.js"
+  ],
+  "permissions": [
+    "https://coretaxdjp.pajak.go.id/*",
+    "activeTab",
+    "storage",
+    "tabs"
+  ],
+  "icons": {
+    "48": "icons/icon48.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "better-coretax@arism.id"
+    }
+  }
+}

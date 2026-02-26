@@ -1,0 +1,12 @@
+#ch-badge {
+  transition: transform 0.2s, background-color 0.2s;
+}
+
+#ch-badge:hover {
+  transform: scale(1.1);
+  background-color: #e64a19;
+}
+
+#ch-badge:active {
+  transform: scale(0.95);
+}

@@ -85,14 +85,15 @@ body {
 }
 
 .badge-idle .badge-dot { background-color: var(--secondary); }
-.badge-active .badge-dot { background-color: var(--primary); animation: pulse 1.5s infinite; }
+.badge-ready .badge-dot { background-color: var(--primary); }
+.badge-active .badge-dot { background-color: var(--warning); animation: pulse 1.5s infinite; }
 .badge-success .badge-dot { background-color: var(--success); }
 .badge-error .badge-dot { background-color: var(--danger); }
 
 @keyframes pulse {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 
 /* Boxes */
@@ -156,6 +157,16 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
   filter: grayscale(0.5);
+}
+
+.btn-stop {
+  background-color: var(--danger);
+  color: white;
+}
+
+.btn-stop:hover {
+  background-color: #dc2626;
+  transform: translateY(-1px);
 }
 
 /* Progress Section */

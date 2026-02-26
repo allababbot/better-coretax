@@ -1,0 +1,25 @@
+{
+  "name": "better-coretax",
+  "version": "1.0.0",
+  "description": "Better Coretax DJP Firefox Extension",
+  "main": "build.js",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch"
+  },
+  "keywords": [
+    "firefox",
+    "extension",
+    "coretax"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/firefox-webext-browser": "^120.0.4",
+    "esbuild": "^0.20.1",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
