@@ -15,7 +15,7 @@ const buildOptions = {
 	sourcemap: watch ? "inline" : false,
 	outdir: "dist",
 	platform: "browser",
-	target: ["firefox120"],
+	target: ["es2020"],
 	loader: {
 		".ts": "ts",
 	},
@@ -46,10 +46,19 @@ function copyAssets() {
 		{ src: "src/popup/popup.html", dest: "dist/popup/popup.html" },
 		{ src: "src/popup/popup.css", dest: "dist/popup/popup.css" },
 		{ src: "styles/injected.css", dest: "dist/styles/injected.css" },
-		{ src: "icons", dest: "dist/icons" },
 	];
 
+	// Check if icons folder exists before adding to assets
+	if (fs.existsSync("icons")) {
+		assets.push({ src: "icons", dest: "dist/icons" });
+	}
+
 	assets.forEach((asset) => {
+		if (!fs.existsSync(asset.src)) {
+			console.warn(`Warning: Asset source ${asset.src} not found, skipping.`);
+			return;
+		}
+
 		const destDir = path.dirname(asset.dest);
 		if (!fs.existsSync(destDir)) {
 			fs.mkdirSync(destDir, { recursive: true });

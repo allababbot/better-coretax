@@ -8,16 +8,24 @@
 // Stores scrape state so popup can reconnect after being closed.
 // ============================================================
 
-import { type ExportData, exportCSV, exportJSON } from "./exporter";
+// Cross-browser shim
+// @ts-ignore
+const _browser = typeof browser !== "undefined" ? browser : (globalThis as any).chrome;
+const browserAPI: any = _browser;
+
+import { type ExportData, exportXLSX } from "./exporter";
 import {
 	injectBadge,
 	injectExportButton,
+	injectGridFilters,
 	isOutputTaxPage,
+	isSptPage,
 	removeExportButton,
 	updatePanelComplete,
 	updatePanelError,
 	updatePanelIdle,
 	updatePanelProgress,
+	injectToolbarFilter,
 } from "./ui";
 
 console.log("better coretax aktif");
@@ -43,19 +51,30 @@ let isRunning = false;
 let scrapedData: Record<string, unknown>[] | null = null;
 let scrapedFields: string[] | null = null;
 
-// ── SPA Detection ───────────────────────────────────
-
 let lastUrl = location.href;
+let injectionTimeout: any = null;
+
 const observer = new MutationObserver(() => {
 	const url = location.href;
 	if (url !== lastUrl) {
 		lastUrl = url;
 		console.log("Better Coretax: URL changed to", url);
 		onNavigate();
+	} else if (isOutputTaxPage() || isSptPage()) {
+		if (injectionTimeout) clearTimeout(injectionTimeout);
+		if (isOutputTaxPage()) {
+			// Toolbar filter handles its own retries
+			injectToolbarFilter();
+			injectionTimeout = setTimeout(() => {
+				injectGridFilters();
+			}, 300); 
+		}
+		// Always safely attempt to reinject the button if we arrive here
+		injectExportButton();
 	}
 });
 
-observer.observe(document, { subtree: true, childList: true });
+observer.observe(document.body, { subtree: true, childList: true });
 
 // ── Inject the scraper script into MAIN world ───────
 
@@ -64,7 +83,7 @@ function injectScraper(): void {
 
 	const script = document.createElement("script");
 	script.id = "__ch_scraper_injected__";
-	script.src = browser.runtime.getURL("content/scraper.js");
+	script.src = browserAPI.runtime.getURL("content/scraper.js");
 	script.onload = () => {
 		console.log("Better Coretax: Scraper injected into page context");
 	};
@@ -75,7 +94,7 @@ function injectScraper(): void {
 
 function sendToPopup(msg: Record<string, unknown>): void {
 	try {
-		browser.runtime.sendMessage(msg).catch(() => {
+		browserAPI.runtime.sendMessage(msg).catch(() => {
 			// Popup closed or extension context invalidated
 		});
 	} catch (_) {
@@ -85,8 +104,8 @@ function sendToPopup(msg: Record<string, unknown>): void {
 
 // ── Relay: Popup → Content → Page ───────────────────
 
-browser.runtime.onMessage.addListener(
-	(msg: Record<string, unknown>, _sender, sendResponse) => {
+browserAPI.runtime.onMessage.addListener(
+	(msg: Record<string, any>, _sender: any, sendResponse: (response?: any) => void) => {
 		if (msg.type === "START_SCRAPE" || msg.type === "STOP_SCRAPE") {
 			window.postMessage({ ...msg, direction: "FROM_CONTENT" }, "*");
 			if (msg.type === "START_SCRAPE") {
@@ -148,6 +167,18 @@ window.addEventListener("message", (event: MessageEvent) => {
 			cleanMsg.pages || 0,
 			cleanMsg.elapsed || "0s",
 		);
+
+		if (scrapedData && scrapedFields) {
+			const exportData: ExportData = {
+				data: scrapedData,
+				fields: scrapedFields,
+				// @ts-ignore
+				filenameHint: cleanMsg.filenameHint,
+				// @ts-ignore
+				source: cleanMsg.source
+			};
+			exportXLSX(exportData);
+		}
 	}
 
 	if (cleanMsg.type === "SCRAPE_ERROR") {
@@ -157,6 +188,44 @@ window.addEventListener("message", (event: MessageEvent) => {
 
 	// Forward to popup
 	sendToPopup(cleanMsg);
+});
+
+// ── Grid Filter Event ───────────────────────────────
+
+document.addEventListener("keyup", (e: KeyboardEvent) => {
+	const target = e.target as HTMLInputElement;
+	if (target && (target.id === "ch-toolbar-filter-reference" || target.id === "ch-grid-filter-reference")) {
+		if (e.key === "Enter") {
+			console.log("Better Coretax: Reference filter triggered via Enter");
+			const value = target.value.trim();
+			window.postMessage(
+				{
+					type: "SET_SERVER_FILTER",
+					field: "Reference",
+					value: value.toUpperCase(),
+					direction: "FROM_CONTENT",
+				},
+				"*",
+			);
+
+			// Trigger a search by clicking the "Cari" or "Refresh" button
+			const searchBtn = Array.from(document.querySelectorAll("button")).find(btn => {
+				const text = btn.textContent?.toLowerCase() || "";
+				// Check for icon classes inside the button or spans
+				const hasIcon = !!btn.querySelector(".pi-search, .pi-refresh, .pi-filter");
+				return text.includes("cari") || 
+					   text.includes("refresh") || 
+					   hasIcon;
+			}) as HTMLButtonElement;
+
+			if (searchBtn) {
+				console.log("Better Coretax: Triggering search via button in 100ms:", searchBtn.textContent?.trim());
+				setTimeout(() => searchBtn.click(), 100);
+			} else {
+				console.warn("Better Coretax: Could not find search/refresh button to trigger filter");
+			}
+		}
+	}
 });
 
 // ── In-page button events ───────────────────────────
@@ -193,39 +262,45 @@ function startScrape(): void {
 	window.postMessage({ type: "START_SCRAPE", direction: "FROM_CONTENT" }, "*");
 }
 
-document.addEventListener("ch:export", ((e: CustomEvent<string>) => {
-	if (!scrapedData || !scrapedFields) return;
 
-	if (e.detail === "csv") {
-		const exportData: ExportData = {
-			data: scrapedData,
-			fields: scrapedFields,
-		};
-		exportCSV(exportData);
-	} else if (e.detail === "json") {
-		exportJSON(scrapedData);
-	}
-}) as EventListener);
 
 // ── Init & Navigation ───────────────────────────────
 
 function onNavigate(): void {
-	if (isOutputTaxPage()) {
+	console.log("Better Coretax: Navigate event triggered. Current URL:", window.location.href);
+	if (isOutputTaxPage() || isSptPage()) {
+		console.log("Better Coretax: Supported page detected, ensuring injection...");
 		injectBadge();
 		injectScraper();
 		injectExportButton();
+		if (isOutputTaxPage()) {
+			injectToolbarFilter();
+			setTimeout(() => {
+				injectGridFilters();
+			}, 1500);
+		}
 	} else {
+		console.log("Better Coretax: Unrecognized page, removing tools if present.");
 		removeExportButton();
 	}
 }
 
 function init(): void {
-	console.log("Better Coretax: Initializing on page...", window.location.href);
+	console.log("Better Coretax: Extension starting up on page...", window.location.href);
 	injectBadge();
 	injectScraper();
 
-	if (isOutputTaxPage()) {
+	if (isOutputTaxPage() || isSptPage()) {
+		console.log("Better Coretax: Page match found on init.");
 		injectExportButton();
+		if (isOutputTaxPage()) {
+			injectToolbarFilter();
+			setTimeout(() => {
+				injectGridFilters();
+			}, 1500);
+		}
+	} else {
+		console.log("Better Coretax: Page match not found on init.");
 	}
 }
 

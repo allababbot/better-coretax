@@ -24,6 +24,7 @@
 		response: unknown;
 		initialData: Record<string, unknown>[];
 		initialFirst: number;
+		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2";
 	}
 
 	interface ScrapeProgress {
@@ -41,6 +42,8 @@
 		total: number;
 		pages: number;
 		elapsed: string;
+		filenameHint?: string;
+		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2";
 	}
 
 	interface ScrapeError {
@@ -117,105 +120,147 @@
 
 	// ── Intercept XHR to capture Angular's request ──────
 
+	// ── Global XHR Interception Layer ──────────────────
+
+	const origOpen = XMLHttpRequest.prototype.open;
+	const origSend = XMLHttpRequest.prototype.send;
+	const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+
+	const filterState: Record<string, any> = {};
+	const captureSubscribers: ((req: CapturedRequest) => void)[] = [];
+
+	// ── Message Listener for Filters ───────────────────
+
+	window.addEventListener("message", (event) => {
+		if (event.source !== window || event.data.direction !== "FROM_CONTENT")
+			return;
+		if (event.data.type === "SET_SERVER_FILTER") {
+			const { field, value } = event.data;
+			if (value) {
+				filterState[field] = { value, matchMode: "contains" };
+			} else {
+				delete filterState[field];
+			}
+		}
+	});
+
+	// ── Prototype Overrides ────────────────────────────
+
+	XMLHttpRequest.prototype.open = function (
+		this: InterceptedXHR,
+		method: string,
+		url: string | URL,
+		...args: unknown[]
+	) {
+		this.__url = String(url);
+		this.__method = method;
+		this.__headers = {};
+		return origOpen.apply(this, [method, url, ...args] as Parameters<typeof origOpen>);
+	} as typeof XMLHttpRequest.prototype.open;
+
+	XMLHttpRequest.prototype.setRequestHeader = function (
+		this: InterceptedXHR,
+		...args: [string, string]
+	) {
+		if (this.__headers) this.__headers[args[0]] = args[1];
+		return origSetHeader.apply(this, args);
+	};
+
+	XMLHttpRequest.prototype.send = function (
+		this: InterceptedXHR,
+		body?: Document | XMLHttpRequestBodyInit | null,
+	) {
+		const xhr = this;
+		let finalBody = body;
+
+		const isOutputTax = xhr.__url?.includes("outputinvoice/list");
+		const isA2 = xhr.__url?.includes("la2-grid");
+		const isB2 = xhr.__url?.includes("lb2-grid");
+		const isTargetApi = isOutputTax || isA2 || isB2;
+
+		// 1. Inject Filter (Strategi B)
+		if (isTargetApi && typeof body === "string") {
+			try {
+				const parsed = JSON.parse(body);
+				const filterKey = "Filters" in parsed ? "Filters" : "filters";
+				if (!parsed[filterKey]) parsed[filterKey] = [];
+
+				if (Array.isArray(parsed[filterKey])) {
+					// Remove existing "Reference" filter to prevent duplicates
+					parsed[filterKey] = parsed[filterKey].filter((f: any) => f.PropertyName !== "Reference");
+					
+					// Inject active filters
+					for (const [field, config] of Object.entries(filterState)) {
+						parsed[filterKey].push({
+							PropertyName: field,
+							Value: config.value,
+							MatchMode: "contains", 
+							CaseSensitive: false, 
+							AsString: false // Changed to false to try matching native behavior
+						});
+					}
+				}
+				finalBody = JSON.stringify(parsed);
+			} catch (e) {
+				console.error("Better Coretax [Scraper]: Filter injection failed", e);
+			}
+		}
+
+		// 2. Data Inspection & Capture
+		if (isTargetApi) {
+			const currentFinalBody = finalBody;
+			xhr.addEventListener("load", () => {
+				let respData: any = null;
+				try { respData = JSON.parse(xhr.responseText); } catch (_) { }
+
+				// No logs needed here anymore
+
+				if (captureSubscribers.length > 0) {
+					const captured: CapturedRequest = {
+						url: xhr.__url || "",
+						headers: { ...(xhr.__headers || {}) },
+						body: null,
+						rawBody: typeof currentFinalBody === "string" ? currentFinalBody : "",
+						response: respData,
+						initialData: respData?.Payload?.Data || [],
+						initialFirst: 0,
+						source: isA2 ? "SPT_A2" : (isB2 ? "SPT_B2" : "OUTPUT_TAX")
+					};
+					const subs = [...captureSubscribers];
+					captureSubscribers.length = 0;
+					subs.forEach(s => s(captured));
+				}
+			});
+		}
+
+		return origSend.call(this, finalBody);
+	};
+
+	// ── Intercept XHR to capture Angular's request ──────
+
 	function interceptRequest(): Promise<CapturedRequest> {
 		return new Promise<CapturedRequest>((resolve, reject) => {
-			const origOpen = XMLHttpRequest.prototype.open;
-			const origSend = XMLHttpRequest.prototype.send;
-			const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
-			let found = false;
+			let resolved = false;
 
-			XMLHttpRequest.prototype.open = function (
-				this: InterceptedXHR,
-				method: string,
-				url: string | URL,
-				...args: unknown[]
-			) {
-				this.__url = String(url);
-				this.__method = method;
-				this.__headers = {};
-				return origOpen.apply(this, [method, url, ...args] as Parameters<
-					typeof origOpen
-				>);
-			} as typeof XMLHttpRequest.prototype.open;
-
-			XMLHttpRequest.prototype.setRequestHeader = function (
-				this: InterceptedXHR,
-				...args: [string, string]
-			) {
-				if (this.__headers) this.__headers[args[0]] = args[1];
-				return origSetHeader.apply(this, args);
+			const sub = (req: CapturedRequest) => {
+				resolved = true;
+				resolve(req);
 			};
-
-			XMLHttpRequest.prototype.send = function (
-				this: InterceptedXHR,
-				body?: Document | XMLHttpRequestBodyInit | null,
-			) {
-				const xhr = this;
-				if (!found && xhr.__url && xhr.__url.includes("outputinvoice/list")) {
-					found = true;
-					let parsedBody: Record<string, unknown> | null = null;
-					try {
-						parsedBody = JSON.parse(body as string);
-					} catch (_) {
-						/* ignore */
-					}
-
-					xhr.addEventListener("load", () => {
-						XMLHttpRequest.prototype.open = origOpen;
-						XMLHttpRequest.prototype.send = origSend;
-						XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
-
-						let respData: {
-							Payload?: { Data?: Record<string, unknown>[] };
-						} | null = null;
-						try {
-							respData = JSON.parse(xhr.responseText);
-						} catch (_) {
-							/* ignore */
-						}
-
-						resolve({
-							url: xhr.__url || "",
-							headers: { ...(xhr.__headers || {}) },
-							body: parsedBody,
-							rawBody: body as string,
-							response: respData,
-							initialData: respData?.Payload?.Data || [],
-							initialFirst: (parsedBody?.First as number) || 0,
-						});
-					});
-
-					xhr.addEventListener("error", () => {
-						XMLHttpRequest.prototype.open = origOpen;
-						XMLHttpRequest.prototype.send = origSend;
-						XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
-						reject(new Error("Request gagal"));
-					});
-				}
-				return origSend.call(this, body);
-			};
+			captureSubscribers.push(sub);
 
 			// Auto-click Next Page button (PrimeNG paginator)
 			setTimeout(() => {
-				const nextBtn = document.querySelector(
-					"button.p-paginator-next:not(.p-disabled)",
-				) as HTMLButtonElement | null;
-				if (nextBtn) {
-					nextBtn.click();
-				}
+				const nextBtn = document.querySelector("button.p-paginator-next:not(.p-disabled)") as HTMLButtonElement;
+				if (nextBtn) nextBtn.click();
 			}, 500);
 
-			// Timeout after 15 seconds
+			// Timeout
 			setTimeout(() => {
-				if (!found) {
-					XMLHttpRequest.prototype.open = origOpen;
-					XMLHttpRequest.prototype.send = origSend;
-					XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
-					reject(
-						new Error(
-							"Tidak ada request tertangkap. Pastikan data sudah dimuat (klik Cari/Refresh).",
-						),
-					);
+				if (!resolved) {
+					// Remove subscriber if still there
+					const idx = captureSubscribers.indexOf(sub);
+					if (idx > -1) captureSubscribers.splice(idx, 1);
+					reject(new Error("Tidak ada request tertangkap (Timeout). Pastikan data sudah dimuat."));
 				}
 			}, 15000);
 		});
@@ -292,13 +337,19 @@
 			let errorCount = 0;
 			const startTime = Date.now();
 
+			const isSpt = captured.source === "SPT_A2" || captured.source === "SPT_B2";
+			// Boost OutputTax (e-faktur) step to 500 per page and reduce delay to 100ms
+			const step = isSpt ? 1000 : 500;
+			const delayMs = isSpt ? 150 : 100;
+
 			while (keepGoing && !stopRequested) {
 				page++;
 				try {
-					const rows = await xhrRequest(captured, first, PAGE_SIZE);
+					const rows = await xhrRequest(captured, first, step);
 					const newRows: Record<string, unknown>[] = [];
 
 					for (const row of rows) {
+						// Fallback identifier if RecordId/AggregateIdentifier is missing.
 						const key =
 							(row.RecordId as string) ||
 							(row.AggregateIdentifier as string) ||
@@ -325,12 +376,12 @@
 						status: `Page ${page}: ${rows.length} baris, ${newRows.length} baru`,
 					});
 
-					if (rows.length < PAGE_SIZE) {
+					if (rows.length < step) {
 						keepGoing = false;
 					} else {
-						first += PAGE_SIZE;
+						first += step;
 						errorCount = 0;
-						await delay(DELAY_MS);
+						await delay(delayMs);
 					}
 				} catch (err) {
 					errorCount++;
@@ -369,6 +420,20 @@
 			);
 			showBadge(`✅ Selesai! ${allData.length} data | ${totalElapsed}`);
 
+			let filenameHint = "";
+			try {
+				const reqBody = JSON.parse(captured.rawBody);
+				const filterKey = "Filters" in reqBody ? "Filters" : "filters";
+				if (reqBody[filterKey] && Array.isArray(reqBody[filterKey])) {
+					const perFilter = reqBody[filterKey].find((f: any) => 
+						f.PropertyName && f.PropertyName.toLowerCase().includes("period")
+					);
+					if (perFilter && perFilter.Value) {
+						filenameHint = String(perFilter.Value).replace(/[^a-zA-Z0-9_-]/g, "");
+					}
+				}
+			} catch (_) {}
+
 			sendToContent({
 				type: "SCRAPE_COMPLETE",
 				data: allData,
@@ -376,6 +441,8 @@
 				total: allData.length,
 				pages: page,
 				elapsed: totalElapsed,
+				filenameHint: filenameHint || undefined,
+				source: captured.source
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);

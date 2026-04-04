@@ -1,22 +1,21 @@
 // ============================================================
 // POPUP.TS — Popup ↔ Content Script Messaging
 // ============================================================
+export {};
 
-import { type ExportData, exportCSV, exportJSON } from "../content/exporter";
+// Cross-browser shim
+// @ts-ignore
+const _browser = typeof browser !== "undefined" ? browser : (globalThis as any).chrome;
+const browserAPI: any = _browser;
 
 // ── DOM Elements ─────────────────────────────────────
 
 const btnScrape = document.getElementById("btn-scrape") as HTMLButtonElement;
-const btnCsv = document.getElementById("btn-csv") as HTMLButtonElement;
-const btnJson = document.getElementById("btn-json") as HTMLButtonElement;
 const statusBadge = document.getElementById("status-badge") as HTMLDivElement;
 const statusText = document.getElementById("status-text") as HTMLSpanElement;
 const infoBox = document.getElementById("info-box") as HTMLDivElement;
 const progressSection = document.getElementById(
 	"progress-section",
-) as HTMLDivElement;
-const exportSection = document.getElementById(
-	"export-section",
 ) as HTMLDivElement;
 const statTotal = document.getElementById("stat-total") as HTMLSpanElement;
 const statPages = document.getElementById("stat-pages") as HTMLSpanElement;
@@ -36,10 +35,12 @@ interface ScrapeState {
 	message?: string;
 	data?: Record<string, unknown>[];
 	fields?: string[];
+	filenameHint?: string;
 }
 
 let scrapedData: Record<string, unknown>[] | null = null;
 let scrapedFields: string[] | null = null;
+let scrapedFilenameHint: string | null = null;
 let isRunning = false;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -52,14 +53,6 @@ function setStatus(type: string, text: string): void {
 
 function showProgress(): void {
 	progressSection.classList.remove("hidden");
-}
-
-function showExport(): void {
-	exportSection.classList.remove("hidden");
-}
-
-function hideExport(): void {
-	exportSection.classList.add("hidden");
 }
 
 function setScrapeButton(): void {
@@ -83,8 +76,8 @@ function resetScrapeButton(): void {
 
 // ── Check if we're on the right page ─────────────────
 
-async function getActiveTab(): Promise<browser.tabs.Tab | undefined> {
-	const tabs = await browser.tabs.query({
+async function getActiveTab(): Promise<any | undefined> {
+	const tabs = await browserAPI.tabs.query({
 		active: true,
 		currentWindow: true,
 	});
@@ -148,6 +141,7 @@ function applyState(state: ScrapeState): void {
 		isRunning = false;
 		scrapedData = state.data || null;
 		scrapedFields = state.fields || null;
+		scrapedFilenameHint = state.filenameHint || null;
 		showProgress();
 		hintBox.classList.add("hidden");
 		statTotal.textContent = (state.total || 0).toLocaleString("id-ID");
@@ -160,7 +154,6 @@ function applyState(state: ScrapeState): void {
 			`${(state.total || 0).toLocaleString("id-ID")} faktur berhasil diambil`,
 		);
 		resetScrapeButton();
-		showExport();
 		stopPolling();
 	}
 
@@ -182,7 +175,7 @@ function startPolling(tabId: number): void {
 	stopPolling();
 	pollInterval = setInterval(async () => {
 		try {
-			const response = await browser.tabs.sendMessage(tabId, {
+			const response = await browserAPI.tabs.sendMessage(tabId, {
 				type: "GET_STATE",
 			});
 			if (response?.state) {
@@ -208,7 +201,7 @@ btnScrape.addEventListener("click", async () => {
 		// Stop scraping
 		const tab = await getActiveTab();
 		if (tab?.id) {
-			browser.tabs.sendMessage(tab.id, { type: "STOP_SCRAPE" });
+			browserAPI.tabs.sendMessage(tab.id, { type: "STOP_SCRAPE" });
 		}
 		isRunning = false;
 		stopPolling();
@@ -223,7 +216,6 @@ btnScrape.addEventListener("click", async () => {
 	isRunning = true;
 	scrapedData = null;
 	scrapedFields = null;
-	hideExport();
 	showProgress();
 	hintBox.classList.add("hidden");
 
@@ -238,24 +230,12 @@ btnScrape.addEventListener("click", async () => {
 	setScrapeButton();
 
 	// Send message to content script
-	browser.tabs.sendMessage(tab.id, { type: "START_SCRAPE" });
+	browserAPI.tabs.sendMessage(tab.id, { type: "START_SCRAPE" });
 
 	// Start polling for state updates
 	startPolling(tab.id);
 });
 
-// ── Export functions ─────────────────────────────────
-
-btnCsv.addEventListener("click", () => {
-	if (!scrapedData || !scrapedFields) return;
-	const exportData: ExportData = { data: scrapedData, fields: scrapedFields };
-	exportCSV(exportData);
-});
-
-btnJson.addEventListener("click", () => {
-	if (!scrapedData) return;
-	exportJSON(scrapedData);
-});
 
 // ── Listen for messages from content script ──────────
 
@@ -271,7 +251,7 @@ function isScrapeState(msg: unknown): msg is ScrapeState {
 	);
 }
 
-browser.runtime.onMessage.addListener((msg: unknown) => {
+browserAPI.runtime.onMessage.addListener((msg: unknown) => {
 	if (isScrapeState(msg)) {
 		applyState(msg);
 	}
@@ -288,7 +268,7 @@ async function init(): Promise<void> {
 	if (!tab?.id) return;
 
 	try {
-		const response = await browser.tabs.sendMessage(tab.id, {
+		const response = await browserAPI.tabs.sendMessage(tab.id, {
 			type: "GET_STATE",
 		});
 		if (response?.state) {
