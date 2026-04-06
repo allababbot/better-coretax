@@ -24,7 +24,7 @@
 		response: unknown;
 		initialData: Record<string, unknown>[];
 		initialFirst: number;
-		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2";
+		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2" | "WITHHOLDING_SLIPS";
 	}
 
 	interface ScrapeProgress {
@@ -43,7 +43,7 @@
 		pages: number;
 		elapsed: string;
 		filenameHint?: string;
-		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2";
+		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2" | "WITHHOLDING_SLIPS";
 	}
 
 	interface ScrapeError {
@@ -128,6 +128,8 @@
 
 	const filterState: Record<string, any> = {};
 	const captureSubscribers: ((req: CapturedRequest) => void)[] = [];
+	let lastCaptured: CapturedRequest | null = null;
+	let lastCapturedTime = 0;
 
 	// ── Message Listener for Filters ───────────────────
 
@@ -176,7 +178,8 @@
 		const isOutputTax = xhr.__url?.includes("outputinvoice/list");
 		const isA2 = xhr.__url?.includes("la2-grid");
 		const isB2 = xhr.__url?.includes("lb2-grid");
-		const isTargetApi = isOutputTax || isA2 || isB2;
+		const isWithholding = xhr.__url?.includes("GetMyWithholdingSlip");
+		const isTargetApi = isOutputTax || isA2 || isB2 || isWithholding;
 
 		// 1. Inject Filter (Strategi B)
 		if (isTargetApi && typeof body === "string") {
@@ -213,23 +216,24 @@
 				let respData: any = null;
 				try { respData = JSON.parse(xhr.responseText); } catch (_) { }
 
-				// No logs needed here anymore
+				const captured: CapturedRequest = {
+					url: xhr.__url || "",
+					headers: { ...(xhr.__headers || {}) },
+					body: null,
+					rawBody: typeof currentFinalBody === "string" ? currentFinalBody : "",
+					response: respData,
+					initialData: respData?.Payload?.Data || [],
+					initialFirst: 0,
+					source: isA2 ? "SPT_A2" : (isB2 ? "SPT_B2" : (isWithholding ? "WITHHOLDING_SLIPS" : "OUTPUT_TAX"))
+				};
 
-				if (captureSubscribers.length > 0) {
-					const captured: CapturedRequest = {
-						url: xhr.__url || "",
-						headers: { ...(xhr.__headers || {}) },
-						body: null,
-						rawBody: typeof currentFinalBody === "string" ? currentFinalBody : "",
-						response: respData,
-						initialData: respData?.Payload?.Data || [],
-						initialFirst: 0,
-						source: isA2 ? "SPT_A2" : (isB2 ? "SPT_B2" : "OUTPUT_TAX")
-					};
-					const subs = [...captureSubscribers];
-					captureSubscribers.length = 0;
-					subs.forEach(s => s(captured));
-				}
+				// Update global cache
+				lastCaptured = captured;
+				lastCapturedTime = Date.now();
+
+				const subs = [...captureSubscribers];
+				captureSubscribers.length = 0;
+				subs.forEach(s => s(captured));
 			});
 		}
 
@@ -242,16 +246,42 @@
 		return new Promise<CapturedRequest>((resolve, reject) => {
 			let resolved = false;
 
+			// 1. Check if we have a "warm" cache from the same portal context
+			if (lastCaptured && (Date.now() - lastCapturedTime < 300000)) { // 5 minutes fresh
+				console.log("[Scraper] Using cached request from history.");
+				resolved = true;
+				resolve(lastCaptured);
+				return;
+			}
+
 			const sub = (req: CapturedRequest) => {
 				resolved = true;
 				resolve(req);
 			};
 			captureSubscribers.push(sub);
 
-			// Auto-click Next Page button (PrimeNG paginator)
+			// 2. Strategy: Try clicking "Next Page" first
 			setTimeout(() => {
 				const nextBtn = document.querySelector("button.p-paginator-next:not(.p-disabled)") as HTMLButtonElement;
-				if (nextBtn) nextBtn.click();
+				if (nextBtn) {
+					console.log("[Scraper] Triggering Next Page...");
+					nextBtn.click();
+				} else {
+					// 3. Fallback Strategy: Try clicking "Refresh" or "Cari" if Next is not available
+					console.log("[Scraper] Next button not available/disabled. Trying fallback trigger...");
+					const fallbackBtn = Array.from(document.querySelectorAll("button")).find(b => {
+						const t = b.textContent?.toLowerCase() || "";
+						return t.includes("cari") || t.includes("search") || t.includes("refresh") || 
+						       b.querySelector(".pi-search") || b.querySelector(".pi-refresh") || b.querySelector(".pi-filter");
+					}) as HTMLButtonElement;
+					
+					if (fallbackBtn) {
+						console.log("[Scraper] Triggering fallback button:", fallbackBtn.textContent?.trim());
+						fallbackBtn.click();
+					} else {
+						console.warn("[Scraper] No trigger buttons found.");
+					}
+				}
 			}, 500);
 
 			// Timeout
@@ -260,7 +290,7 @@
 					// Remove subscriber if still there
 					const idx = captureSubscribers.indexOf(sub);
 					if (idx > -1) captureSubscribers.splice(idx, 1);
-					reject(new Error("Tidak ada request tertangkap (Timeout). Pastikan data sudah dimuat."));
+					reject(new Error("Tidak ada request tertangkap (Timeout). Silakan muat ulang data atau klik tombol filter/cari di halaman."));
 				}
 			}, 15000);
 		});
@@ -303,6 +333,60 @@
 			const body = JSON.parse(captured.rawBody) as Record<string, unknown>;
 			body.First = first;
 			body.Rows = rows;
+			xhr.send(JSON.stringify(body));
+		});
+	}
+
+	/**
+	 * Fetch PDF document from DJP API
+	 */
+	function xhrDownloadPdf(
+		captured: CapturedRequest,
+		row: any
+	): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			const url = captured.url.replace("GetMyWithholdingSlip", "DownloadWithholdingSlips/download-pdf-document");
+			xhr.open("POST", url, true);
+
+			for (const [k, v] of Object.entries(captured.headers)) {
+				xhr.setRequestHeader(k, v);
+			}
+
+			xhr.timeout = TIMEOUT;
+
+			xhr.onload = () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					try {
+						const res = JSON.parse(xhr.responseText);
+						if (res.IsSuccessful && res.Payload && res.Payload.Message && res.Payload.Message.Data) {
+							resolve(res.Payload.Message.Data);
+						} else {
+							reject(new Error(res.Message || (res.Payload && res.Payload.Message && res.Payload.Message.ErrorMessage) || "Gagal mengambil konten PDF"));
+						}
+					} catch (_) {
+						reject(new Error("Parse error saat download PDF"));
+					}
+				} else {
+					reject(new Error(`HTTP ${xhr.status} saat download PDF`));
+				}
+			};
+			xhr.onerror = () => reject(new Error("Network error saat download PDF"));
+			xhr.ontimeout = () => reject(new Error("Timeout saat download PDF"));
+
+			// Map identifiers from row to expected request body
+			const capturedBody = captured.rawBody ? JSON.parse(captured.rawBody) : {};
+			const body = {
+				WithholdingSlipsAggregateIdentifier: row.WithholdingslipsAggregateIdentifier,
+				WithholdingSlipsRecordIdentifier: row.RecordId,
+				DocumentAggregateIdentifier: row.DocumentFormAggregateIdentifier,
+				TaxpayerAggregateIdentifier: row.TaxpayerAggregateIdentifier,
+				EbupotType: capturedBody.WithholdingType || "EBUPOTBPU",
+				DocumentDate: row.WithholdingSlipsDate,
+				TaxIdentificationNumber: row.TaxIdentificationNumber
+			};
+			
+			console.log("[Scraper] Mengirim request PDF dengan payload:", body);
 			xhr.send(JSON.stringify(body));
 		});
 	}
@@ -433,6 +517,45 @@
 					}
 				}
 			} catch (_) {}
+
+			if (captured.source === "WITHHOLDING_SLIPS") {
+				// Special handling for Bulk PDF Download
+				const total = allData.length;
+				console.log(`[Scraper] Starting Bulk PDF download for ${total} items...`);
+				
+				for (let i = 0; i < total; i++) {
+					if (stopRequested) break;
+					
+					const row = allData[i];
+					const status = `Mengunduh PDF ${i + 1}/${total}: ${row.WithholdingSlipNumber || '...'}`;
+					
+					sendToContent({
+						type: "SCRAPE_PROGRESS",
+						total: i + 1,
+						page,
+						elapsed: totalElapsed,
+						status: status,
+					});
+					showBadge(`📥 PDF ${i+1}/${total} | ${totalElapsed}`);
+
+					try {
+						const base64 = await xhrDownloadPdf(captured, row);
+						// Send the individual PDF to content script to trigger browser download
+						window.postMessage({
+							type: "DOWNLOAD_PDF_ITEM",
+							base64: base64,
+							item: row,
+							direction: "FROM_PAGE"
+						}, "*");
+						
+						// Wait a bit between downloads to be safe
+						await delay(800);
+					} catch (err) {
+						console.error(`[Scraper] Gagal unduh PDF idx ${i}:`, err);
+						// Continue to next file even if one fails
+					}
+				}
+			}
 
 			sendToContent({
 				type: "SCRAPE_COMPLETE",

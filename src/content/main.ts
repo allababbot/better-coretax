@@ -20,6 +20,7 @@ import {
 	injectGridFilters,
 	isOutputTaxPage,
 	isSptPage,
+	isWithholdingPage,
 	removeExportButton,
 	updatePanelComplete,
 	updatePanelError,
@@ -27,6 +28,7 @@ import {
 	updatePanelProgress,
 	injectToolbarFilter,
 } from "./ui";
+import { base64ToBlob, downloadBlob, generateWithholdingFilename } from "./downloader";
 
 console.log("better coretax aktif");
 
@@ -60,7 +62,7 @@ const observer = new MutationObserver(() => {
 		lastUrl = url;
 		console.log("Better Coretax: URL changed to", url);
 		onNavigate();
-	} else if (isOutputTaxPage() || isSptPage()) {
+	} else if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
 		if (injectionTimeout) clearTimeout(injectionTimeout);
 		if (isOutputTaxPage()) {
 			// Toolbar filter handles its own retries
@@ -168,7 +170,7 @@ window.addEventListener("message", (event: MessageEvent) => {
 			cleanMsg.elapsed || "0s",
 		);
 
-		if (scrapedData && scrapedFields) {
+		if (scrapedData && scrapedFields && cleanMsg.source !== "WITHHOLDING_SLIPS") {
 			const exportData: ExportData = {
 				data: scrapedData,
 				fields: scrapedFields,
@@ -178,6 +180,17 @@ window.addEventListener("message", (event: MessageEvent) => {
 				source: cleanMsg.source
 			};
 			exportXLSX(exportData);
+		}
+	}
+
+	if (cleanMsg.type === "DOWNLOAD_PDF_ITEM") {
+		const { base64, item } = cleanMsg;
+		try {
+			const blob = base64ToBlob(base64);
+			const filename = generateWithholdingFilename(item);
+			downloadBlob(blob, filename);
+		} catch (err) {
+			console.error("Better Coretax: Gagal memproses download file", err);
 		}
 	}
 
@@ -268,7 +281,7 @@ function startScrape(): void {
 
 function onNavigate(): void {
 	console.log("Better Coretax: Navigate event triggered. Current URL:", window.location.href);
-	if (isOutputTaxPage() || isSptPage()) {
+	if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
 		console.log("Better Coretax: Supported page detected, ensuring injection...");
 		injectBadge();
 		injectScraper();
@@ -290,7 +303,7 @@ function init(): void {
 	injectBadge();
 	injectScraper();
 
-	if (isOutputTaxPage() || isSptPage()) {
+	if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
 		console.log("Better Coretax: Page match found on init.");
 		injectExportButton();
 		if (isOutputTaxPage()) {

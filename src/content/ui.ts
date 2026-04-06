@@ -27,6 +27,16 @@ export function isSptPage(): boolean {
 	return result;
 }
 
+/** Check if we're on the Withholding Slips page */
+export function isWithholdingPage(): boolean {
+	const url = location.href;
+	const isWithholdingPortal = url.includes("/withholding-slips-portal");
+	const isMySlips = url.includes("my-withholding-slips");
+	const result = isWithholdingPortal && isMySlips;
+	console.log(`Better Coretax: Withholding Slips Page check [${result}] for URL: ${url}`);
+	return result;
+}
+
 /** 
  * Helper to find the "Upload Faktur" button or its container.
  * Coretax often changes IDs, so we use multiple strategies.
@@ -248,8 +258,9 @@ export function injectExportButton(retries = 15): void {
 	
 	const isOutputTax = isOutputTaxPage();
 	const isSpt = isSptPage();
+	const isWithholding = isWithholdingPage();
 
-	if (!isOutputTax && !isSpt) {
+	if (!isOutputTax && !isSpt && !isWithholding) {
 		console.log("Better Coretax: Page unsupported for export injection, skipping.");
 		return;
 	}
@@ -266,6 +277,24 @@ export function injectExportButton(retries = 15): void {
 		const visibleHeader = headers.find(el => (el as HTMLElement).offsetParent !== null);
 		if (visibleHeader) {
 			anchorEl = visibleHeader as HTMLElement;
+			insertMode = "append";
+		}
+	} else if (isWithholding) {
+		// Withholding page anchor: look for breadcrumbs or table header
+		const headers = Array.from(document.querySelectorAll(".p-datatable-header .float-left, .card-header .float-left"));
+		anchorEl = headers.find(el => (el as HTMLElement).offsetParent !== null) as HTMLElement || null;
+		
+		if (!anchorEl) {
+			// Fallback: search for any "Cari" or "Download" related buttons
+			const anyBtn = Array.from(document.querySelectorAll("button.p-button")).find(b => 
+				b.textContent?.toLowerCase().includes("filter") || 
+				b.querySelector(".pi-filter")
+			);
+			if (anyBtn) {
+				anchorEl = anyBtn as HTMLElement;
+				insertMode = "before";
+			}
+		} else {
 			insertMode = "append";
 		}
 	}
@@ -305,7 +334,7 @@ export function injectExportButton(retries = 15): void {
 	
 	exportBtnEl.innerHTML = `
 		<span class="p-button-icon p-button-icon-left pi pi-download" aria-hidden="true"></span>
-		<span class="p-button-label">Better Export</span>
+		<span class="p-button-label">${isWithholding ? "Bulk Download PDF" : "Better Export"}</span>
 	`;
 
 	if (insertMode === "before") {
@@ -474,7 +503,11 @@ export function updatePanelComplete(
 	els.statTotal.textContent = total.toLocaleString("id-ID");
 	els.statPages.textContent = String(pages);
 	els.statTime.textContent = elapsed;
-	els.statusText.textContent = `✅ ${total.toLocaleString("id-ID")} faktur berhasil diambil!`;
+	if (isWithholdingPage()) {
+		els.statusText.textContent = `✅ ${total.toLocaleString("id-ID")} dokumen PDF berhasil diunduh!`;
+	} else {
+		els.statusText.textContent = `✅ ${total.toLocaleString("id-ID")} faktur berhasil diambil!`;
+	}
 	els.btnScrape.innerHTML = "▶ Mulai Scrape";
 	els.btnScrape.classList.remove("ch-btn-stop");
 	els.btnScrape.disabled = false;
