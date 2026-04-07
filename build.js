@@ -64,17 +64,20 @@ function copyAndModifyAssets() {
 				scripts: ["background/background.js"],
 				type: "module"
 			};
-			// Firefox requires browser_specific_settings for non-AMO builds
+			// Ensure gecko settings exist
 			if (!manifest.browser_specific_settings) {
-				manifest.browser_specific_settings = {
-					gecko: {
-						id: "better-coretax@arism.local",
-						data_collection_permissions: {
-							collected: false
-						}
-					}
+				manifest.browser_specific_settings = {};
+			}
+			if (!manifest.browser_specific_settings.gecko) {
+				manifest.browser_specific_settings.gecko = {
+					id: "better-coretax@arism.local"
 				};
 			}
+			
+			// Set data_collection_permissions
+			manifest.browser_specific_settings.gecko.data_collection_permissions = {
+				collected: false
+			};
 		}
 
 		const destManifestPath = path.join(__dirname, outdir, "manifest.json");
