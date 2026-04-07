@@ -1,15 +1,15 @@
 // ============================================================
 // UI.TS — Inject export controls into the Coretax PPN page
 // ============================================================
-// Injects an "Export Data" button into the toolbar (left of
-// Upload Faktur) with a dropdown panel for scrape + export.
+// Injects an "Better Export" button into the toolbar.
+// Clicking it directly starts/toggles the scrape process.
+// Progress is shown in a floating info bar in the bottom-right.
 // Communicates via custom DOM events with main.ts.
 // ============================================================
 
 /** Check if we're on the PPN Keluaran page */
 export function isOutputTaxPage(): boolean {
 	const url = location.href;
-	// More flexible check: must have e-invoice-portal AND (output-tax OR keluaran OR vat-out)
 	const isEInvoice = url.includes("/e-invoice-portal");
 	const isKeluaran = url.includes("output-tax") || url.includes("keluaran") || url.includes("vat-out");
 	const result = isEInvoice && isKeluaran;
@@ -39,14 +39,11 @@ export function isWithholdingPage(): boolean {
 
 /** 
  * Helper to find the "Upload Faktur" button or its container.
- * Coretax often changes IDs, so we use multiple strategies.
  */
 function findAnchorButton(): HTMLElement | null {
-	// Strategy 1: Known ID
 	const byId = document.getElementById("SubmitSelectedInvoicesButton");
 	if (byId) return byId;
 
-	// Strategy 2: Button text (case insensitive)
 	const buttons = Array.from(document.querySelectorAll("button.p-button"));
 	const byText = buttons.find(b => 
 		b.textContent?.toLowerCase().includes("upload faktur") || 
@@ -54,71 +51,76 @@ function findAnchorButton(): HTMLElement | null {
 	);
 	if (byText) return byText as HTMLElement;
 
-	// Strategy 3: Icon class typical for upload
 	const byIcon = document.querySelector(".pi-upload")?.closest("button");
 	if (byIcon) return byIcon as HTMLElement;
 
 	return null;
 }
 
-/** Inject the "CH" badge (always shown on Coretax pages) */
-export function injectBadge() {
-	if (document.getElementById("ch-badge")) return;
-	console.log("Better Coretax: Injecting badge...");
+// ── Floating Info State ──────────────────────────────
 
-	const badge = document.createElement("div");
-	badge.id = "ch-badge";
-	badge.textContent = "BC";
-	badge.title = "Better Coretax Active";
-
-	Object.assign(badge.style, {
-		position: "fixed",
-		bottom: "20px",
-		right: "20px",
-		width: "40px",
-		height: "40px",
-		backgroundColor: "#ff5722",
-		color: "white",
-		borderRadius: "50%",
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "center",
-		fontSize: "14px",
-		fontWeight: "bold",
-		boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
-		zIndex: "9999",
-		cursor: "pointer",
-		userSelect: "none",
-	});
-
-	document.body.appendChild(badge);
-}
-
-// ── SVG Icons ────────────────────────────────────────
-
-const ICON_DOWNLOAD = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m0 0L5 7m3 3l3-3M3 12v1a1 1 0 001 1h8a1 1 0 001-1v-1"/></svg>`;
-const ICON_LOADING = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="ch-spin"><circle cx="8" cy="8" r="6" stroke-dasharray="30 10" /></svg>`;
-
-// ── Export Panel State ───────────────────────────────
-
-let panelEl: HTMLDivElement | null = null;
+let badgeEl: HTMLDivElement | null = null;
+let statsEl: HTMLDivElement | null = null;
 let exportBtnEl: HTMLButtonElement | null = null;
 let isInjected = false;
 
-interface PanelElements {
+interface FloatingElements {
 	statusText: HTMLDivElement;
-	progressRow: HTMLDivElement;
 	statTotal: HTMLSpanElement;
 	statPages: HTMLSpanElement;
 	statTime: HTMLSpanElement;
-	btnScrape: HTMLButtonElement;
 	progressBar: HTMLDivElement;
 }
 
-let els: PanelElements | null = null;
+let els: FloatingElements | null = null;
+
+/** Inject the Floating Info Bar (bottom-right) */
+export function injectBadge() {
+	if (document.getElementById("ch-floating-info-container")) return;
+	console.log("Better Coretax: Injecting floating info bar...");
+
+	const container = document.createElement("div");
+	container.id = "ch-floating-info-container";
+	container.className = "ch-floating-info";
+
+	container.innerHTML = `
+		<div class="ch-floating-stats ch-hidden" id="ch-floating-stats">
+			<div class="ch-f-stat-item">
+				<span class="ch-f-label">Data</span>
+				<span class="ch-f-value" id="ch-f-total">0</span>
+			</div>
+			<div class="ch-f-stat-item">
+				<span class="ch-f-label">Hal</span>
+				<span class="ch-f-value" id="ch-f-pages">0</span>
+			</div>
+			<div class="ch-f-stat-item">
+				<span class="ch-f-label">Waktu</span>
+				<span class="ch-f-value" id="ch-f-time">0s</span>
+			</div>
+			<div class="ch-f-status" id="ch-f-status">Siap...</div>
+			<div class="ch-f-progress-container">
+				<div class="ch-f-progress-bar" id="ch-f-progress-bar"></div>
+			</div>
+		</div>
+		<div class="ch-badge" id="ch-badge">BC</div>
+	`;
+
+	document.body.appendChild(container);
+
+	badgeEl = container.querySelector("#ch-badge") as HTMLDivElement;
+	statsEl = container.querySelector("#ch-floating-stats") as HTMLDivElement;
+
+	els = {
+		statusText: container.querySelector("#ch-f-status") as HTMLDivElement,
+		statTotal: container.querySelector("#ch-f-total") as HTMLSpanElement,
+		statPages: container.querySelector("#ch-f-pages") as HTMLSpanElement,
+		statTime: container.querySelector("#ch-f-time") as HTMLSpanElement,
+		progressBar: container.querySelector("#ch-f-progress-bar") as HTMLDivElement,
+	};
+}
 
 /**
- * Finds column index by text in the header row.
+ * Finds column index by text.
  */
 function findColumnIndex(headerRow: HTMLTableRowElement, searchTexts: string[]): number {
 	const ths = Array.from(headerRow.querySelectorAll("th"));
@@ -133,7 +135,6 @@ function findColumnIndex(headerRow: HTMLTableRowElement, searchTexts: string[]):
  */
 export function injectGridFilters(): void {
 	if (!isOutputTaxPage()) return;
-
 	const thead = document.querySelector("thead");
 	if (!thead) return;
 
@@ -143,18 +144,14 @@ export function injectGridFilters(): void {
 	const mainHeaderRow = headerRows[0] as HTMLTableRowElement;
 	const filterRow = headerRows[1] as HTMLTableRowElement;
 
-	// Check if already injected
 	if (filterRow.querySelector("#ch-filter-reference")) return;
 
-	// Find the Reference column dynamically
 	const refIdx = findColumnIndex(mainHeaderRow, ["Referensi", "Reference"]);
 	if (refIdx === -1) return;
 
 	const filterCells = Array.from(filterRow.querySelectorAll("th"));
 	const refCell = filterCells[refIdx];
 	if (!refCell) return;
-
-	console.log("Better Coretax: Injecting Reference filter...");
 
 	const container = document.createElement("div");
 	container.className = "ch-grid-filter-container";
@@ -171,49 +168,29 @@ export function injectGridFilters(): void {
 		</div>
 	`;
 
-	refCell.innerHTML = ""; // Clear existing content (e.g. empty &nbsp; or other filters)
+	refCell.innerHTML = "";
 	refCell.appendChild(container);
 }
 
 /**
- * Inject filter input into the toolbar (after the reset button).
- * Uses a retry mechanism for robust loading.
+ * Inject filter input into the toolbar.
  */
 export function injectToolbarFilter(retries = 15): void {
 	if (!isOutputTaxPage()) return;
 	if (document.getElementById("ch-toolbar-filter-reference")) return;
 
-	console.log(`Better Coretax: Attempting toolbar injection... (${retries} left)`);
-
-	// Strategy-based button search
 	const buttons = Array.from(document.querySelectorAll("button"));
-	
-	// Strategy 1: Tooltip match
-	let anchor = buttons.find(b => b.getAttribute("ptooltip") === "Setel Ulang Filter");
-	
-	// Strategy 2: Icon class match
-	if (!anchor) {
-		anchor = buttons.find(b => b.querySelector(".pi-filter-slash"));
-	}
-	
-	// Strategy 3: Specific Coretax utility button class match
-	if (!anchor) {
-		anchor = buttons.find(b => 
-			(b.className.includes("ct-ovw-btn-mini-cancel") || b.className.includes("ct-ovw-btn-mini")) && 
-			(b.querySelector(".pi-filter-slash") || b.querySelector(".pi-refresh"))
-		);
-	}
+	let anchor = buttons.find(b => b.getAttribute("ptooltip") === "Setel Ulang Filter") ||
+	             buttons.find(b => b.querySelector(".pi-filter-slash")) ||
+				 buttons.find(b => 
+					(b.className.includes("ct-ovw-btn-mini-cancel") || b.className.includes("ct-ovw-btn-mini")) && 
+					(b.querySelector(".pi-filter-slash") || b.querySelector(".pi-refresh"))
+				 );
 
 	if (!anchor) {
-		if (retries > 0) {
-			setTimeout(() => injectToolbarFilter(retries - 1), 1000);
-		} else {
-			console.error("Better Coretax: Failed to find anchor button for toolbar filter after all retries.");
-		}
+		if (retries > 0) setTimeout(() => injectToolbarFilter(retries - 1), 1000);
 		return;
 	}
-
-	console.log("Better Coretax: Toolbar anchor found, injecting filter box.");
 
 	const container = document.createElement("div");
 	container.id = "ch-toolbar-filter-container";
@@ -235,20 +212,16 @@ export function injectToolbarFilter(retries = 15): void {
 		</div>
 	`;
 
-	// Insert after the anchor button
 	anchor.insertAdjacentElement("afterend", container);
-	console.log("Better Coretax: Toolbar Reference filter injected successfully.");
 }
 
 /**
- * Inject the Export button into the toolbar.
+ * Inject the "Better Export" button into the toolbar.
  */
 export function injectExportButton(retries = 15): void {
 	if (isInjected) {
 		const btn = document.getElementById("ch-export-btn");
-		// Verify it is actually in the DOM and VISIBLE (Angular might have destroyed it or hidden its parent tab)
 		if (!btn || btn.offsetParent === null) {
-			console.log("Better Coretax: Export button lost or hidden, reinjecting...");
 			isInjected = false;
 			if (btn) btn.remove();
 		} else {
@@ -260,10 +233,7 @@ export function injectExportButton(retries = 15): void {
 	const isSpt = isSptPage();
 	const isWithholding = isWithholdingPage();
 
-	if (!isOutputTax && !isSpt && !isWithholding) {
-		console.log("Better Coretax: Page unsupported for export injection, skipping.");
-		return;
-	}
+	if (!isOutputTax && !isSpt && !isWithholding) return;
 
 	let anchorEl: HTMLElement | null = null;
 	let insertMode: "before" | "append" = "before";
@@ -272,62 +242,28 @@ export function injectExportButton(retries = 15): void {
 		anchorEl = findAnchorButton();
 		insertMode = "before";
 	} else if (isSpt) {
-		// SPT Page: Angular may keep both tabs in DOM (hiding one). Find the VISIBLE datatable header container.
 		const headers = Array.from(document.querySelectorAll("rshshr-nvat-la2-grid .p-datatable-header .float-left, rshshr-nvat-lb2-grid .p-datatable-header .float-left"));
-		const visibleHeader = headers.find(el => (el as HTMLElement).offsetParent !== null);
-		if (visibleHeader) {
-			anchorEl = visibleHeader as HTMLElement;
-			insertMode = "append";
-		}
+		anchorEl = headers.find(el => (el as HTMLElement).offsetParent !== null) as HTMLElement || null;
+		insertMode = "append";
 	} else if (isWithholding) {
-		// Withholding page anchor: look for breadcrumbs or table header
 		const headers = Array.from(document.querySelectorAll(".p-datatable-header .float-left, .card-header .float-left"));
 		anchorEl = headers.find(el => (el as HTMLElement).offsetParent !== null) as HTMLElement || null;
-		
-		if (!anchorEl) {
-			// Fallback: search for any "Cari" or "Download" related buttons
-			const anyBtn = Array.from(document.querySelectorAll("button.p-button")).find(b => 
-				b.textContent?.toLowerCase().includes("filter") || 
-				b.querySelector(".pi-filter")
-			);
-			if (anyBtn) {
-				anchorEl = anyBtn as HTMLElement;
-				insertMode = "before";
-			}
-		} else {
-			insertMode = "append";
-		}
+		insertMode = "append";
 	}
+
 	if (!anchorEl) {
-		if (retries > 0) {
-			console.log(`Better Coretax: Anchor element not found, retrying... (${retries} left)`);
-			setTimeout(() => injectExportButton(retries - 1), 1000);
-		} else {
-			console.error("Better Coretax: Could not find anchor element after multiple retries.");
-		}
+		if (retries > 0) setTimeout(() => injectExportButton(retries - 1), 1000);
 		return;
 	}
 
-	let containerNode = anchorEl.parentElement;
-	if (insertMode === "append") {
-		containerNode = anchorEl; // We append inside the float-left span
-	}
+	let containerNode = (insertMode === "append") ? anchorEl : anchorEl.parentElement;
+	if (!containerNode) return;
 
-	if (!containerNode) {
-		console.error("Better Coretax: Anchor element has no logical parent/container.");
-		return;
-	}
-
-	console.log("Better Coretax: Anchor button found, injecting Export button.");
 	isInjected = true;
-
-	// ── Create the Export button (matches Coretax style) ──
-
 	exportBtnEl = document.createElement("button");
 	exportBtnEl.id = "ch-export-btn";
 	exportBtnEl.type = "button";
-	exportBtnEl.className =
-		"p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
+	exportBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
 	exportBtnEl.style.backgroundColor = "#ff5722";
 	exportBtnEl.style.borderColor = "#ff5722";
 	exportBtnEl.style.color = "white";
@@ -343,128 +279,15 @@ export function injectExportButton(retries = 15): void {
 		containerNode.appendChild(exportBtnEl);
 	}
 
-	// ── Create the dropdown panel ──
-
-	// Remove old panel if it was left behind
-	const oldPanel = document.getElementById("ch-export-panel");
-	if (oldPanel) {
-		oldPanel.remove();
-	}
-
-	panelEl = document.createElement("div");
-	panelEl.id = "ch-export-panel";
-	panelEl.className = "ch-export-panel";
-	panelEl.innerHTML = `
-		<div class="ch-panel-header">
-			<span class="ch-panel-title">📊 Better Coretax Export</span>
-			<button class="ch-panel-close" id="ch-panel-close">✕</button>
-		</div>
-		<div class="ch-panel-body">
-			<div class="ch-status-text" id="ch-status-text">
-				Klik "Mulai Scrape" untuk menarik otomatis semua data.
-			</div>
-			<div class="ch-progress-row ch-hidden" id="ch-progress-row">
-				<div class="ch-stat">
-					<span class="ch-stat-value" id="ch-stat-total">0</span>
-					<span class="ch-stat-label">Data</span>
-				</div>
-				<div class="ch-stat">
-					<span class="ch-stat-value" id="ch-stat-pages">0</span>
-					<span class="ch-stat-label">Halaman</span>
-				</div>
-				<div class="ch-stat">
-					<span class="ch-stat-value" id="ch-stat-time">0s</span>
-					<span class="ch-stat-label">Waktu</span>
-				</div>
-			</div>
-			<div class="ch-progress-bar-container ch-hidden" id="ch-progress-bar-container">
-				<div class="ch-progress-bar" id="ch-progress-bar" style="width: 0%"></div>
-			</div>
-			<button class="ch-btn ch-btn-primary" id="ch-btn-scrape">
-				▶ Mulai Scrape
-			</button>
-		</div>
-	`;
-
-	document.body.appendChild(panelEl);
-
-	// Cache panel elements
-	els = {
-		statusText: panelEl.querySelector("#ch-status-text") as HTMLDivElement,
-		progressRow: panelEl.querySelector("#ch-progress-row") as HTMLDivElement,
-		statTotal: panelEl.querySelector("#ch-stat-total") as HTMLSpanElement,
-		statPages: panelEl.querySelector("#ch-stat-pages") as HTMLSpanElement,
-		statTime: panelEl.querySelector("#ch-stat-time") as HTMLSpanElement,
-		btnScrape: panelEl.querySelector("#ch-btn-scrape") as HTMLButtonElement,
-		progressBar: panelEl.querySelector("#ch-progress-bar") as HTMLDivElement,
-	};
-
-	// ── Event: Toggle panel ──
-
+	// ── Event: Direct Start Scrape ──
 	exportBtnEl.addEventListener("click", (e: MouseEvent) => {
 		e.stopPropagation();
-		const wasOpen = panelEl?.classList.contains("ch-panel-open") ?? false;
-		togglePanel();
-		// Auto-start scrape when opening the panel (not when closing)
-		if (!wasOpen) {
-			document.dispatchEvent(new CustomEvent("ch:scrape-start"));
-		}
-	});
-
-	// ── Event: Close panel ──
-
-	panelEl
-		.querySelector("#ch-panel-close")
-		?.addEventListener("click", () => closePanel());
-
-	// Close when clicking outside
-	document.addEventListener("click", (e: MouseEvent) => {
-		if (
-			panelEl &&
-			!panelEl.contains(e.target as Node) &&
-			exportBtnEl &&
-			!exportBtnEl.contains(e.target as Node)
-		) {
-			closePanel();
-		}
-	});
-
-	// ── Event: Scrape button ──
-
-	els.btnScrape.addEventListener("click", () => {
+		// Directly toggle scraping, no dropdown
 		document.dispatchEvent(new CustomEvent("ch:scrape-toggle"));
 	});
 }
 
-// ── Panel open/close ─────────────────────────────────
-
-function togglePanel(): void {
-	if (!panelEl) return;
-	const isOpen = panelEl.classList.contains("ch-panel-open");
-	if (isOpen) {
-		closePanel();
-	} else {
-		openPanel();
-	}
-}
-
-function openPanel(): void {
-	if (!panelEl || !exportBtnEl) return;
-
-	// Position relative to the Export button
-	const rect = exportBtnEl.getBoundingClientRect();
-	panelEl.style.top = `${rect.bottom + 8}px`;
-	panelEl.style.left = `${rect.left}px`;
-
-	panelEl.classList.add("ch-panel-open");
-}
-
-function closePanel(): void {
-	if (!panelEl) return;
-	panelEl.classList.remove("ch-panel-open");
-}
-
-// ── Public API: Update panel UI from main.ts ─────────
+// ── Public API: Update Floating Info Bar ───────────────
 
 export function updatePanelProgress(
 	total: number,
@@ -472,25 +295,21 @@ export function updatePanelProgress(
 	elapsed: string,
 	status: string,
 ): void {
-	if (!els) return;
-	els.progressRow.classList.remove("ch-hidden");
+	if (!els || !statsEl) return;
+	statsEl.classList.remove("ch-hidden");
 	els.statTotal.textContent = total.toLocaleString("id-ID");
 	els.statPages.textContent = String(page);
 	els.statTime.textContent = elapsed;
 	els.statusText.textContent = status;
-	els.btnScrape.innerHTML = "⏹ Batalkan Proses";
-	els.btnScrape.classList.add("ch-btn-stop");
-	els.btnScrape.disabled = false;
 
-	// Update progress bar if we have a guess or total
-	const barContainer = document.getElementById("ch-progress-bar-container");
-	if (barContainer) {
-		barContainer.classList.remove("ch-hidden");
-		// If status implies we are still catching, use an indeterminate pulse
-		// once we have pages, we can do 100% / pages * page but that's inaccurate
-		// best is to use a slow creep or just pulse until finished
-		els.progressBar.style.width = `${Math.min(95, (page * 10) || 5)}%`;
+	// Invert Export Button state
+	if (exportBtnEl) {
+		exportBtnEl.innerHTML = `<span class="pi pi-spin pi-spinner mr-1"></span> STOP Scrape`;
+		exportBtnEl.style.backgroundColor = "#ef4444";
+		exportBtnEl.style.borderColor = "#ef4444";
 	}
+
+	els.progressBar.style.width = `${Math.min(95, (page * 10) || 5)}%`;
 }
 
 export function updatePanelComplete(
@@ -498,57 +317,60 @@ export function updatePanelComplete(
 	pages: number,
 	elapsed: string,
 ): void {
-	if (!els) return;
-	els.progressRow.classList.remove("ch-hidden");
+	if (!els || !statsEl) return;
+	statsEl.classList.remove("ch-hidden");
 	els.statTotal.textContent = total.toLocaleString("id-ID");
 	els.statPages.textContent = String(pages);
 	els.statTime.textContent = elapsed;
+	
 	if (isWithholdingPage()) {
-		els.statusText.textContent = `✅ ${total.toLocaleString("id-ID")} dokumen PDF berhasil diunduh!`;
+		els.statusText.textContent = `✅ ${total} PDF Berhasil`;
 	} else {
-		els.statusText.textContent = `✅ ${total.toLocaleString("id-ID")} faktur berhasil diambil!`;
+		els.statusText.textContent = `✅ ${total} Data Berhasil`;
 	}
-	els.btnScrape.innerHTML = "▶ Mulai Scrape";
-	els.btnScrape.classList.remove("ch-btn-stop");
-	els.btnScrape.disabled = false;
+
+	if (exportBtnEl) {
+		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		exportBtnEl.style.backgroundColor = "#ff5722";
+		exportBtnEl.style.borderColor = "#ff5722";
+	}
 
 	els.progressBar.style.width = "100%";
-	els.progressBar.classList.add("ch-progress-complete");
 }
 
 export function updatePanelError(message: string): void {
-	if (!els) return;
+	if (!els || !statsEl) return;
+	statsEl.classList.remove("ch-hidden");
 	els.statusText.textContent = `❌ ${message}`;
-	els.btnScrape.innerHTML = "▶ Mulai Scrape";
-	els.btnScrape.classList.remove("ch-btn-stop");
-	els.btnScrape.disabled = false;
+
+	if (exportBtnEl) {
+		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		exportBtnEl.style.backgroundColor = "#ff5722";
+		exportBtnEl.style.borderColor = "#ff5722";
+	}
 }
 
 export function updatePanelIdle(): void {
-	if (!els) return;
-	els.statusText.textContent =
-		'Klik "Mulai Scrape" untuk mengambil semua data dari semua halaman.';
-	els.progressRow.classList.add("ch-hidden");
-	els.btnScrape.innerHTML = "▶ Mulai Scrape";
-	els.btnScrape.classList.remove("ch-btn-stop");
-	els.btnScrape.disabled = false;
-
-	const barContainer = document.getElementById("ch-progress-bar-container");
-	if (barContainer) barContainer.classList.add("ch-hidden");
-	els.progressBar.style.width = "0%";
-	els.progressBar.classList.remove("ch-progress-complete");
+	if (!els || !statsEl) return;
+	statsEl.classList.add("ch-hidden");
+	
+	if (exportBtnEl) {
+		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		exportBtnEl.style.backgroundColor = "#ff5722";
+		exportBtnEl.style.borderColor = "#ff5722";
+	}
 }
 
-/** Remove the injected elements (e.g. on SPA navigation away) */
+/** Remove elements on navigation */
 export function removeExportButton(): void {
 	if (exportBtnEl) {
 		exportBtnEl.remove();
 		exportBtnEl = null;
 	}
-	if (panelEl) {
-		panelEl.remove();
-		panelEl = null;
-	}
+	const container = document.getElementById("ch-floating-info-container");
+	if (container) container.remove();
 	els = null;
+	badgeEl = null;
+	statsEl = null;
 	isInjected = false;
 }
