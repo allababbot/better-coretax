@@ -5,7 +5,12 @@
   "main": "build.js",
   "scripts": {
     "build": "node build.js",
-    "watch": "node build.js --watch"
+    "build:chrome": "node build.js --browser=chrome",
+    "build:firefox": "node build.js --browser=firefox",
+    "watch": "node build.js --watch",
+    "package:chrome": "node build.js --browser=chrome && node package.js --browser=chrome",
+    "package:firefox": "node build.js --browser=firefox && node package.js --browser=firefox",
+    "package": "npm run package:chrome && npm run package:firefox"
   },
   "keywords": [
     "firefox",
@@ -16,6 +21,7 @@
   "license": "ISC",
   "devDependencies": {
     "@types/firefox-webext-browser": "^120.0.4",
+    "archiver": "^7.0.1",
     "esbuild": "^0.20.1",
     "typescript": "^5.3.3"
   },
