@@ -16,7 +16,6 @@ const buildOptions = {
 		{ in: "src/content/main.ts", out: "content/main" },
 		{ in: "src/content/scraper.ts", out: "content/scraper" },
 		{ in: "src/background/background.ts", out: "background/background" },
-		{ in: "src/popup/popup.ts", out: "popup/popup" },
 	],
 	bundle: true,
 	minify: !watch,
@@ -86,8 +85,6 @@ function copyAndModifyAssets() {
 
 	// 2. Copy other assets
 	const assets = [
-		{ src: "src/popup/popup.html", dest: `${outdir}/popup/popup.html` },
-		{ src: "src/popup/popup.css", dest: `${outdir}/popup/popup.css` },
 		{ src: "styles/injected.css", dest: `${outdir}/styles/injected.css` },
 	];
 

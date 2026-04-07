@@ -3,9 +3,6 @@
   "name": "Better Coretax",
   "version": "1.0.0",
   "description": "Helper for Coretax DJP",
-  "action": {
-    "default_popup": "popup/popup.html"
-  },
   "background": {
     "scripts": ["background/background.js"],
     "type": "module"
