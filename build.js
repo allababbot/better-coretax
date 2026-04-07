@@ -76,8 +76,8 @@ function copyAndModifyAssets() {
 			
 			// Set data_collection_permissions
 			manifest.browser_specific_settings.gecko.data_collection_permissions = {
-				collected: false,
-				required: false
+				required: ["none"],
+				optional: []
 			};
 		}
 
