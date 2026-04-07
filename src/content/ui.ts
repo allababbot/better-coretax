@@ -87,39 +87,64 @@ export function injectBadge() {
 	container.id = "ch-floating-info-container";
 	container.className = "ch-floating-info";
 
-	container.innerHTML = `
-		<div class="ch-floating-stats ch-hidden" id="ch-floating-stats">
-			<div class="ch-f-stat-item">
-				<span class="ch-f-label">Data</span>
-				<span class="ch-f-value" id="ch-f-total">0</span>
-			</div>
-			<div class="ch-f-stat-item">
-				<span class="ch-f-label">Hal</span>
-				<span class="ch-f-value" id="ch-f-pages">0</span>
-			</div>
-			<div class="ch-f-stat-item">
-				<span class="ch-f-label">Waktu</span>
-				<span class="ch-f-value" id="ch-f-time">0s</span>
-			</div>
-			<div class="ch-f-status" id="ch-f-status">Siap...</div>
-			<div class="ch-f-progress-container">
-				<div class="ch-f-progress-bar" id="ch-f-progress-bar"></div>
-			</div>
-		</div>
-		<div class="ch-badge" id="ch-badge">BC</div>
-	`;
+	// Create stats element
+	statsEl = document.createElement("div");
+	statsEl.id = "ch-floating-stats";
+	statsEl.className = "ch-floating-stats ch-hidden";
 
+	const createStatItem = (label: string, id: string) => {
+		const item = document.createElement("div");
+		item.className = "ch-f-stat-item";
+		const lbl = document.createElement("span");
+		lbl.className = "ch-f-label";
+		lbl.textContent = label;
+		const val = document.createElement("span");
+		val.className = "ch-f-value";
+		val.id = id;
+		val.textContent = "0";
+		item.appendChild(lbl);
+		item.appendChild(val);
+		return { item, val };
+	};
+
+	const totalStat = createStatItem("Data", "ch-f-total");
+	const pagesStat = createStatItem("Hal", "ch-f-pages");
+	const timeStat = createStatItem("Waktu", "ch-f-time");
+
+	const statusText = document.createElement("div");
+	statusText.id = "ch-f-status";
+	statusText.className = "ch-f-status";
+	statusText.textContent = "Siap...";
+
+	const progressContainer = document.createElement("div");
+	progressContainer.className = "ch-f-progress-container";
+	const progressBar = document.createElement("div");
+	progressBar.id = "ch-f-progress-bar";
+	progressBar.className = "ch-f-progress-bar";
+	progressContainer.appendChild(progressBar);
+
+	statsEl.appendChild(totalStat.item);
+	statsEl.appendChild(pagesStat.item);
+	statsEl.appendChild(timeStat.item);
+	statsEl.appendChild(statusText);
+	statsEl.appendChild(progressContainer);
+
+	// Create badge element
+	badgeEl = document.createElement("div");
+	badgeEl.id = "ch-badge";
+	badgeEl.className = "ch-badge";
+	badgeEl.textContent = "BC";
+
+	container.appendChild(statsEl);
+	container.appendChild(badgeEl);
 	document.body.appendChild(container);
 
-	badgeEl = container.querySelector("#ch-badge") as HTMLDivElement;
-	statsEl = container.querySelector("#ch-floating-stats") as HTMLDivElement;
-
 	els = {
-		statusText: container.querySelector("#ch-f-status") as HTMLDivElement,
-		statTotal: container.querySelector("#ch-f-total") as HTMLSpanElement,
-		statPages: container.querySelector("#ch-f-pages") as HTMLSpanElement,
-		statTime: container.querySelector("#ch-f-time") as HTMLSpanElement,
-		progressBar: container.querySelector("#ch-f-progress-bar") as HTMLDivElement,
+		statusText,
+		statTotal: totalStat.val,
+		statPages: pagesStat.val,
+		statTime: timeStat.val,
+		progressBar,
 	};
 }
 
@@ -159,18 +184,27 @@ export function injectGridFilters(): void {
 
 	const container = document.createElement("div");
 	container.className = "ch-grid-filter-container";
-	container.innerHTML = `
-		<div class="p-column-filter p-column-filter-row">
-			<div class="p-fluid">
-				<input type="text" 
-					id="ch-grid-filter-reference"
-					class="p-inputtext p-component" 
-					placeholder="Cari Referensi..." 
-					style="width: 100%; font-size: 12px; padding: 0.5rem;"
-				/>
-			</div>
-		</div>
-	`;
+	
+	const filterWrapper = document.createElement("div");
+	filterWrapper.className = "p-column-filter p-column-filter-row";
+	
+	const fluidWrapper = document.createElement("div");
+	fluidWrapper.className = "p-fluid";
+	
+	const input = document.createElement("input");
+	input.type = "text";
+	input.id = "ch-grid-filter-reference";
+	input.className = "p-inputtext p-component";
+	input.placeholder = "Cari Referensi...";
+	Object.assign(input.style, {
+		width: "100%",
+		fontSize: "12px",
+		padding: "0.5rem"
+	});
+	
+	fluidWrapper.appendChild(input);
+	filterWrapper.appendChild(fluidWrapper);
+	container.appendChild(filterWrapper);
 
 	refCell.innerHTML = "";
 	refCell.appendChild(container);
@@ -198,23 +232,44 @@ export function injectToolbarFilter(retries = 15): void {
 
 	const container = document.createElement("div");
 	container.id = "ch-toolbar-filter-container";
-	container.style.display = "inline-block";
-	container.style.marginLeft = "0.5rem";
-	container.style.verticalAlign = "middle";
+	Object.assign(container.style, {
+		display: "inline-block",
+		marginLeft: "0.5rem",
+		verticalAlign: "middle"
+	});
 
-	container.innerHTML = `
-		<div class="p-inputgroup">
-			<span class="p-inputgroup-addon" style="padding: 0 0.5rem; font-size: 12px; background: #334155; color: white; border: 1px solid #475569; border-right: none;">
-				<i class="pi pi-search"></i>
-			</span>
-			<input type="text" 
-				id="ch-toolbar-filter-reference"
-				class="p-inputtext p-component" 
-				placeholder="Cari Referensi..." 
-				style="width: 180px; font-size: 12px; padding: 0.5rem; border-color: #475569;"
-			/>
-		</div>
-	`;
+	const group = document.createElement("div");
+	group.className = "p-inputgroup";
+	
+	const addon = document.createElement("span");
+	addon.className = "p-inputgroup-addon";
+	Object.assign(addon.style, {
+		padding: "0 0.5rem",
+		fontSize: "12px",
+		background: "#334155",
+		color: "white",
+		border: "1px solid #475569",
+		borderRight: "none"
+	});
+	const icon = document.createElement("i");
+	icon.className = "pi pi-search";
+	addon.appendChild(icon);
+	
+	const input = document.createElement("input");
+	input.type = "text";
+	input.id = "ch-toolbar-filter-reference";
+	input.className = "p-inputtext p-component";
+	input.placeholder = "Cari Referensi...";
+	Object.assign(input.style, {
+		width: "180px",
+		fontSize: "12px",
+		padding: "0.5rem",
+		borderColor: "#475569"
+	});
+	
+	group.appendChild(addon);
+	group.appendChild(input);
+	container.appendChild(group);
 
 	anchor.insertAdjacentElement("afterend", container);
 }
@@ -268,14 +323,22 @@ export function injectExportButton(retries = 15): void {
 	exportBtnEl.id = "ch-export-btn";
 	exportBtnEl.type = "button";
 	exportBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
-	exportBtnEl.style.backgroundColor = "#ff5722";
-	exportBtnEl.style.borderColor = "#ff5722";
-	exportBtnEl.style.color = "white";
+	Object.assign(exportBtnEl.style, {
+		backgroundColor: "#ff5722",
+		borderColor: "#ff5722",
+		color: "white"
+	});
 	
-	exportBtnEl.innerHTML = `
-		<span class="p-button-icon p-button-icon-left pi pi-download" aria-hidden="true"></span>
-		<span class="p-button-label">${isWithholding ? "Bulk Download PDF" : "Better Export"}</span>
-	`;
+	const icon = document.createElement("span");
+	icon.className = "p-button-icon p-button-icon-left pi pi-download";
+	icon.setAttribute("aria-hidden", "true");
+	
+	const label = document.createElement("span");
+	label.className = "p-button-label";
+	label.textContent = isWithholding ? "Bulk Download PDF" : "Better Export";
+	
+	exportBtnEl.appendChild(icon);
+	exportBtnEl.appendChild(label);
 
 	if (insertMode === "before") {
 		containerNode.insertBefore(exportBtnEl, anchorEl);
@@ -308,7 +371,12 @@ export function updatePanelProgress(
 
 	// Invert Export Button state
 	if (exportBtnEl) {
-		exportBtnEl.innerHTML = `<span class="pi pi-spin pi-spinner mr-1"></span> STOP Scrape`;
+		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-spin pi-spinner mr-1";
+		
+		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+		if (label) label.textContent = " STOP Scrape";
+		
 		exportBtnEl.style.backgroundColor = "#ef4444";
 		exportBtnEl.style.borderColor = "#ef4444";
 	}
@@ -334,7 +402,12 @@ export function updatePanelComplete(
 	}
 
 	if (exportBtnEl) {
-		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+		
+		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+
 		exportBtnEl.style.backgroundColor = "#ff5722";
 		exportBtnEl.style.borderColor = "#ff5722";
 	}
@@ -348,7 +421,12 @@ export function updatePanelError(message: string): void {
 	els.statusText.textContent = `❌ ${message}`;
 
 	if (exportBtnEl) {
-		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+		
+		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+
 		exportBtnEl.style.backgroundColor = "#ff5722";
 		exportBtnEl.style.borderColor = "#ff5722";
 	}
@@ -359,7 +437,12 @@ export function updatePanelIdle(): void {
 	statsEl.classList.add("ch-hidden");
 	
 	if (exportBtnEl) {
-		exportBtnEl.innerHTML = `<span class="pi pi-download mr-1"></span> Better Export`;
+		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+		
+		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+
 		exportBtnEl.style.backgroundColor = "#ff5722";
 		exportBtnEl.style.borderColor = "#ff5722";
 	}

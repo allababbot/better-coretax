@@ -68,7 +68,10 @@ function copyAndModifyAssets() {
 			if (!manifest.browser_specific_settings) {
 				manifest.browser_specific_settings = {
 					gecko: {
-						id: "better-coretax@arism.local"
+						id: "better-coretax@arism.local",
+						data_collection_permissions: {
+							collected: false
+						}
 					}
 				};
 			}
