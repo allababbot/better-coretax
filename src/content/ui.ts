@@ -76,9 +76,13 @@ let els: FloatingElements | null = null;
 
 /** Inject the Floating Info Bar (bottom-right) */
 export function injectBadge() {
-	if (document.getElementById("ch-floating-info-container")) return;
-	console.log("Better Coretax: Injecting floating info bar...");
+	// Remove any old versions to avoid duplicates
+	const oldContainer = document.getElementById("ch-floating-info-container");
+	const oldBadge = document.getElementById("ch-badge");
+	if (oldContainer) oldContainer.remove();
+	else if (oldBadge) oldBadge.remove();
 
+	console.log("Better Coretax: Injecting floating info bar...");
 	const container = document.createElement("div");
 	container.id = "ch-floating-info-container";
 	container.className = "ch-floating-info";
