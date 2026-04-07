@@ -93,31 +93,6 @@
 		}
 	}
 
-	// ── In-page floating badge ────────────────────────
-
-	let badge: HTMLDivElement | null = null;
-
-	function showBadge(text: string): void {
-		if (!badge) {
-			badge = document.createElement("div");
-			badge.id = "__scraper_badge__";
-			badge.style.cssText =
-				"position:fixed;bottom:16px;right:16px;z-index:999999;" +
-				"background:#1a1f2e;color:#60a5fa;border:1px solid #3b82f6;" +
-				"padding:8px 14px;border-radius:8px;font:13px/1.4 sans-serif;" +
-				"box-shadow:0 4px 12px rgba(0,0,0,0.5);pointer-events:none;";
-			document.body.appendChild(badge);
-		}
-		badge.textContent = text;
-	}
-
-	function hideBadge(): void {
-		if (badge) {
-			badge.remove();
-			badge = null;
-		}
-	}
-
 	// ── Intercept XHR to capture Angular's request ──────
 
 	// ── Global XHR Interception Layer ──────────────────
@@ -400,7 +375,6 @@
 	async function startScraping(): Promise<void> {
 		isRunning = true;
 		console.log("[Scraper] ▶ Starting scrape...");
-		showBadge("⏳ Menangkap request...");
 
 		try {
 			sendToContent({
@@ -450,7 +424,6 @@
 					console.log(
 						`[Scraper] Page ${page}: ${rows.length} rows, ${newRows.length} new, total=${allData.length}, ${elapsed}`,
 					);
-					showBadge(`📊 ${allData.length} data | Page ${page} | ${elapsed}`);
 
 					sendToContent({
 						type: "SCRAPE_PROGRESS",
@@ -484,7 +457,6 @@
 
 			if (stopRequested) {
 				console.log("[Scraper] ⏹ Stopped by user.");
-				hideBadge();
 				isRunning = false;
 				return;
 			}
@@ -502,7 +474,6 @@
 			console.log(
 				`[Scraper] ✅ Complete: ${allData.length} records in ${totalElapsed}`,
 			);
-			showBadge(`✅ Selesai! ${allData.length} data | ${totalElapsed}`);
 
 			let filenameHint = "";
 			try {
@@ -536,7 +507,6 @@
 						elapsed: totalElapsed,
 						status: status,
 					});
-					showBadge(`📥 PDF ${i+1}/${total} | ${totalElapsed}`);
 
 					try {
 						const base64 = await xhrDownloadPdf(captured, row);
@@ -570,7 +540,6 @@
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			console.error("[Scraper] ❌ Error:", errMsg);
-			showBadge(`❌ Error: ${errMsg}`);
 
 			sendToContent({
 				type: "SCRAPE_ERROR",
