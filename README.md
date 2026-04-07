@@ -2,7 +2,7 @@
 
 **Better Coretax** is a powerful browser extension designed to enhance and optimize the DJP Coretax portal. It simplifies the process of parsing, retrieving, and exporting massive volumes of tax data into clean, formatted Excel files and bulk PDF downloads.
 
-## 🚀 Key Features
+## Key Features
 
 - **High-Speed e-Faktur Export (Output Tax):** Automatically scrapes hundreds or thousands of output tax invoice rows in seconds (up to 500 rows per request) without network timeouts.
 - **SPT Masa PPN Annex A2 & B2 Export:** Bypasses portal limitations to pull massive amounts of data for Annex A2 (Output Tax) and B2 (Input Tax) directly into Excel (1,000 rows per request).
@@ -12,12 +12,12 @@
 - **Auto-Formatting Excel:** Automatically converts system date formats (ISO Strings) into standard Indonesian date formats (`DD/MM/YYYY`) in the generated `.xlsx` sets.
 - **Lean UI Integration:** Features a fully integrated in-page UI (floating info bar and custom toolbar buttons) designed to feel like part of the native Coretax experience.
 
-## 🛠 Prerequisites
+## Prerequisites
 
 - **Node.js** (v18 or later)
 - **npm** (v9 or later)
 
-## 📦 Installation & Build
+## Installation & Build
 
 ### 1. Setup
 Clone the repository and install dependencies:
@@ -48,7 +48,7 @@ Generate the production-ready extension for your preferred browser:
 3. Select the `better-coretax-firefox.xpi` file generated in the root directory.
    *(Note: For local testing, ensure `xpinstall.signatures.required` is set to `false` in `about:config`)*.
 
-## 📄 Mozilla Submission (Source Code)
+## Mozilla Submission (Source Code)
 If you are submitting a new version to Mozilla Add-ons (AMO), you must provide the source code as required by their policies for bundled/minified extensions.
 
 Run the following command to generate the source package:
@@ -57,7 +57,7 @@ npm run package:source
 ```
 This will create `better-coretax-source.zip` containing all original source files for review.
 
-## 💻 Tech Stack
+## Tech Stack
 - **Language:** TypeScript
 - **Bundler:** esbuild
 - **Persistence:** Chrome Storage API
