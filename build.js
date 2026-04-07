@@ -70,7 +70,7 @@ function copyAndModifyAssets() {
 			}
 			if (!manifest.browser_specific_settings.gecko) {
 				manifest.browser_specific_settings.gecko = {
-					id: "better-coretax@arism.local"
+					id: "better-coretax-ext-v1@arism.me"
 				};
 			}
 			

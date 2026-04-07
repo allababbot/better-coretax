@@ -10,7 +10,8 @@
     "watch": "node build.js --watch",
     "package:chrome": "node build.js --browser=chrome && node package.js --browser=chrome",
     "package:firefox": "node build.js --browser=firefox && node package.js --browser=firefox",
-    "package": "npm run package:chrome && npm run package:firefox"
+    "package": "npm run package:chrome && npm run package:firefox",
+    "package:source": "node package-source.js"
   },
   "keywords": [
     "firefox",
