@@ -106,6 +106,8 @@ function processData(exportData: ExportData): ExportData {
 	// Default fallback to OutputTax logic
 	const hardcodedFields = [
 		"TaxInvoiceDate",
+		"TaxInvoicePeriod",
+		"TaxInvoiceYear",
 		"BuyerName",
 		"BuyerTIN",
 		"TaxInvoiceNumber",
@@ -120,12 +122,40 @@ function processData(exportData: ExportData): ExportData {
 
 	const processedData = exportData.data.map((row) => {
 		const newRow: Record<string, unknown> = {};
-		for (const f of hardcodedFields) {
-			let val = row[f];
-			if (f === "TaxInvoiceDate") {
-				val = formatDate(val);
+
+		// Extract Masa (Period) - handle TD007 prefix or use TaxPeriodMonth
+		let masa = "";
+		const rawMonth = row["TaxInvoicePeriod"] || row["TaxPeriodMonth"] || row["TaxPeriod"] || "";
+		if (rawMonth) {
+			const sMonth = String(rawMonth);
+			masa = sMonth.slice(-2).replace(/^0/, ""); // Take last 2 digits, remove leading zero
+		}
+
+		// Extract Tahun (Year)
+		let tahun = "";
+		const rawYear = row["TaxInvoiceYear"] || row["TaxPeriodYear"] || row["TaxPeriod"] || "";
+		if (rawYear) {
+			const sYear = String(rawYear);
+			// If it's a 6-digit period like 202604, year is the first 4 digits
+			if (sYear.length >= 6 && /^\d+$/.test(sYear)) {
+				tahun = sYear.slice(0, 4);
+			} else if (sYear.length === 4) {
+				tahun = sYear;
 			}
-			newRow[f] = val;
+		}
+
+		for (const f of hardcodedFields) {
+			if (f === "TaxInvoicePeriod") {
+				newRow[f] = masa;
+			} else if (f === "TaxInvoiceYear") {
+				newRow[f] = tahun;
+			} else {
+				let val = row[f];
+				if (f === "TaxInvoiceDate") {
+					val = formatDate(val);
+				}
+				newRow[f] = val;
+			}
 		}
 		return newRow;
 	});
@@ -136,45 +166,123 @@ function processData(exportData: ExportData): ExportData {
 function generateDynamicFilename(exportData: ExportData): string {
 	const { data: originalData, filenameHint, source } = exportData;
 	const isA2 = source === "SPT_A2";
-	const prefix = isA2 ? "Lampiran_A2_SPT" : "faktur_pajak_keluaran";
+	const prefix = isA2 ? "A2-" : "FPK-";
 
-	if (filenameHint) {
-		return `${prefix}_masa_${filenameHint}`;
-	}
-
-	if (!originalData || originalData.length === 0) {
-		return `${prefix}_${getDateStamp()}`;
-	}
-
-	const periods = new Set<string>();
-
-	for (const row of originalData) {
-		// Fallbacks for different date field names depending on API
-		const dateField = isA2 ? (row["DocumentDate"] || row["Date"] || "") : row["TaxInvoiceDate"];
-		const dStr = String(dateField || "");
-		if (dStr) {
-			const parts = dStr.split("T")[0].split("-");
-			if (parts.length === 3 && parts[0].length === 4) {
-				periods.add(`${parts[0]}_${parts[1]}`);
-			} else {
-				const d = new Date(dStr);
-				if (!isNaN(d.getTime())) {
-					const y = d.getFullYear();
-					const m = String(d.getMonth() + 1).padStart(2, "0");
-					periods.add(`${y}_${m}`);
-				}
+	const formatPeriod = (p: string) => {
+		// 1. Handle internal format YYYY_MM
+		if (p.includes("_")) {
+			const parts = p.split("_");
+			if (parts.length === 2 && parts[0].length === 4 && parts[1].length === 2) {
+				return `${parts[1]}${parts[0]}`; // MMYYYY
 			}
 		}
+
+		// 2. Clear non-digits to handle cases like TD007-2026-04 -> 007202604
+		const digits = p.replace(/\D/g, "");
+
+		// 3. Try to find YYYYMM (6 digits) at the end or as a standalone
+		const yyyymmMatch = digits.match(/(\d{4})(\d{2})$/);
+		if (yyyymmMatch) {
+			const y = parseInt(yyyymmMatch[1]);
+			const m = parseInt(yyyymmMatch[2]);
+			if (y > 1900 && y < 2100 && m >= 1 && m <= 12) {
+				return `${yyyymmMatch[2]}${yyyymmMatch[1]}`; // MMYYYY
+			}
+		}
+
+		// 4. Try to find MMYYYY (6 digits)
+		const mmyyyyMatch = digits.match(/(\d{2})(\d{4})$/);
+		if (mmyyyyMatch) {
+			const m = parseInt(mmyyyyMatch[1]);
+			const y = parseInt(mmyyyyMatch[2]);
+			if (y > 1900 && y < 2100 && m >= 1 && m <= 12) {
+				return digits.slice(-6);
+			}
+		}
+
+		return p.replace(/[^a-zA-Z0-9]/g, "");
+	};
+
+	// PRIORITY 1: USE FILENAME HINT (FILTER)
+	// This represents the user's intent on the portal (e.g. they filtered for April 2025)
+	if (filenameHint) {
+		const formatted = formatPeriod(filenameHint);
+		// Validate if formatted hint looks like a real period or if we just returned junk
+		if (/^\d{6}$/.test(formatted)) {
+			return `${prefix}${formatted}`;
+		}
+		// If it has 6 digits, it's likely a period even if formatPeriod was confused
+		const digits = formatted.replace(/\D/g, "");
+		if (digits.length === 6) return `${prefix}${digits}`;
 	}
 
-	const periodsArr = Array.from(periods).sort();
-	if (periodsArr.length === 1) {
-		return `${prefix}_masa_${periodsArr[0]}`;
-	} else if (periodsArr.length > 1) {
-		return `${prefix}_masa_${periodsArr[0]}_sd_${periodsArr[periodsArr.length - 1]}`;
+	// Helper to get periods from data rows
+	const extractPeriodsFromData = () => {
+		const found = new Set<string>();
+		if (!originalData) return [];
+		for (const row of originalData) {
+			let y = "";
+			let m = "";
+
+			// Priority 1: Specific Tax Period fields (common names in Coretax JSON)
+			const rawY = row["TaxInvoiceYear"] || row["TaxPeriodYear"] || row["TaxYear"] || row["Year"];
+			const rawM = row["TaxInvoicePeriod"] || row["TaxPeriodMonth"] || row["TaxPeriod"] || row["Month"];
+
+			if (rawY && rawM) {
+				const sY = String(rawY);
+				const sM = String(rawM);
+				// If sY is YYYYMM, take first 4.
+				y = (sY.length >= 6) ? sY.slice(0, 4) : sY;
+				// Take last 2 digits for month
+				m = sM.slice(-2).padStart(2, "0");
+			} 
+			// Priority 2: Consolidated TaxPeriod (usually YYYYMM)
+			else if (row["TaxPeriod"] && String(row["TaxPeriod"]).length >= 6) {
+				const sP = String(row["TaxPeriod"]);
+				y = sP.slice(0, 4);
+				m = sP.slice(4, 6);
+			}
+			// Fallback: Date fields (Last Resort - only if no period fields found)
+			else {
+				const dateField = isA2 ? (row["DocumentDate"] || row["Date"] || "") : row["TaxInvoiceDate"];
+				const dStr = String(dateField || "");
+				if (dStr) {
+					const parts = dStr.split("T")[0].split("-");
+					if (parts.length === 3 && parts[0].length === 4) {
+						y = parts[0];
+						m = parts[1];
+					} else {
+						const d = new Date(dStr);
+						if (!isNaN(d.getTime())) {
+							y = String(d.getFullYear());
+							m = String(d.getMonth() + 1).padStart(2, "0");
+						}
+					}
+				}
+			}
+
+			if (y && m && y.length === 4 && m.length === 2) {
+				found.add(`${y}_${m}`); // YYYY_MM
+			}
+		}
+		return Array.from(found).sort();
+	};
+
+	const dataPeriods = extractPeriodsFromData();
+
+	// PRIORITY 2: USE DATA ROWS
+	if (dataPeriods.length > 0) {
+		if (dataPeriods.length === 1) {
+			return `${prefix}${formatPeriod(dataPeriods[0])}`;
+		}
+		return `${prefix}${formatPeriod(dataPeriods[0])}-${formatPeriod(dataPeriods[dataPeriods.length - 1])}`;
 	}
 
-	return `${prefix}_${getDateStamp()}`;
+	// FALLBACK: CURRENT DATE
+	const now = new Date();
+	const mString = String(now.getMonth() + 1).padStart(2, "0");
+	const yString = String(now.getFullYear());
+	return `${prefix}${mString}${yString}`;
 }
 
 export function exportCSV(exportData: ExportData): void {
