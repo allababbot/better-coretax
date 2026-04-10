@@ -2,12 +2,13 @@
 // EXPORTER.TS — Export scraped data to various formats
 // ============================================================
 import * as XLSX from "xlsx";
+import type { ExportSource } from "./page-context";
 
 export interface ExportData {
 	data: Record<string, unknown>[];
 	fields: string[];
 	filenameHint?: string;
-	source?: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2";
+	source?: ExportSource;
 }
 
 function downloadFile(
@@ -56,6 +57,25 @@ function formatDate(dateStr: unknown): string {
 }
 
 function processData(exportData: ExportData): ExportData {
+	if (
+		exportData.source === "INPUT_TAX" ||
+		exportData.source === "OUTPUT_RETURN" ||
+		exportData.source === "INPUT_RETURN"
+	) {
+		const processedData = exportData.data.map((row) => {
+			const newRow: Record<string, unknown> = {};
+			for (const f of exportData.fields) {
+				let val = row[f];
+				if (typeof val === "string" && val.includes("T") && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+					val = formatDate(val);
+				}
+				newRow[f] = val;
+			}
+			return newRow;
+		});
+		return { data: processedData, fields: exportData.fields, source: exportData.source };
+	}
+
 	if (exportData.source === "SPT_A2") {
 		// Hardcoded columns for SPT Masa PPN Lampiran A2 based on user request
 		const a2Fields = [
@@ -166,7 +186,16 @@ function processData(exportData: ExportData): ExportData {
 function generateDynamicFilename(exportData: ExportData): string {
 	const { data: originalData, filenameHint, source } = exportData;
 	const isA2 = source === "SPT_A2";
-	const prefix = isA2 ? "A2-" : "FPK-";
+	const prefix =
+		source === "INPUT_TAX"
+			? "FPM-"
+			: source === "OUTPUT_RETURN"
+				? "RET-FPK-"
+				: source === "INPUT_RETURN"
+					? "RET-FPM-"
+					: isA2
+						? "A2-"
+						: "FPK-";
 
 	const formatPeriod = (p: string) => {
 		// 1. Handle internal format YYYY_MM
@@ -203,15 +232,16 @@ function generateDynamicFilename(exportData: ExportData): string {
 		return p.replace(/[^a-zA-Z0-9]/g, "");
 	};
 
-	// PRIORITY 1: USE FILENAME HINT (FILTER)
-	// This represents the user's intent on the portal (e.g. they filtered for April 2025)
 	if (filenameHint) {
+		if (source === "OUTPUT_RETURN" || source === "INPUT_RETURN") {
+			const year = filenameHint.replace(/\D/g, "").match(/(20\d{2}|19\d{2})/)?.[1];
+			if (year) return `${prefix}${year}`;
+		}
+
 		const formatted = formatPeriod(filenameHint);
-		// Validate if formatted hint looks like a real period or if we just returned junk
 		if (/^\d{6}$/.test(formatted)) {
 			return `${prefix}${formatted}`;
 		}
-		// If it has 6 digits, it's likely a period even if formatPeriod was confused
 		const digits = formatted.replace(/\D/g, "");
 		if (digits.length === 6) return `${prefix}${digits}`;
 	}
@@ -271,7 +301,7 @@ function generateDynamicFilename(exportData: ExportData): string {
 	const dataPeriods = extractPeriodsFromData();
 
 	// PRIORITY 2: USE DATA ROWS
-	if (dataPeriods.length > 0) {
+	if (dataPeriods.length > 0 && source !== "OUTPUT_RETURN" && source !== "INPUT_RETURN") {
 		if (dataPeriods.length === 1) {
 			return `${prefix}${formatPeriod(dataPeriods[0])}`;
 		}
@@ -282,6 +312,9 @@ function generateDynamicFilename(exportData: ExportData): string {
 	const now = new Date();
 	const mString = String(now.getMonth() + 1).padStart(2, "0");
 	const yString = String(now.getFullYear());
+	if (source === "OUTPUT_RETURN" || source === "INPUT_RETURN") {
+		return `${prefix}${yString}`;
+	}
 	return `${prefix}${mString}${yString}`;
 }
 

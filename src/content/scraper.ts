@@ -5,7 +5,17 @@
 // Communicates with content script via window.postMessage.
 // ============================================================
 
+import {
+	type ExportSource,
+	extractFilenameHintFromBody,
+	getPageExportSource,
+	inferCapturedSource,
+	isSptPage,
+	isWithholdingPage,
+} from "./page-context";
+
 (() => {
+
 	const PAGE_SIZE = 50;
 	const DELAY_MS = 300;
 	const TIMEOUT = 30000;
@@ -24,7 +34,7 @@
 		response: unknown;
 		initialData: Record<string, unknown>[];
 		initialFirst: number;
-		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2" | "WITHHOLDING_SLIPS";
+		source: ExportSource;
 	}
 
 	interface ScrapeProgress {
@@ -43,7 +53,7 @@
 		pages: number;
 		elapsed: string;
 		filenameHint?: string;
-		source: "OUTPUT_TAX" | "SPT_A2" | "SPT_B2" | "WITHHOLDING_SLIPS";
+		source: ExportSource;
 	}
 
 	interface ScrapeError {
@@ -149,12 +159,24 @@
 	) {
 		const xhr = this;
 		let finalBody = body;
+		const pageSource = getPageExportSource();
+		const inferredSource = xhr.__url ? inferCapturedSource(xhr.__url) : null;
+		const isKnownSource = !!inferredSource;
+		let isPaginatedGridRequest = false;
 
-		const isOutputTax = xhr.__url?.includes("outputinvoice/list");
-		const isA2 = xhr.__url?.includes("la2-grid");
-		const isB2 = xhr.__url?.includes("lb2-grid");
-		const isWithholding = xhr.__url?.includes("GetMyWithholdingSlip");
-		const isTargetApi = isOutputTax || isA2 || isB2 || isWithholding;
+		if (typeof body === "string") {
+			try {
+				const parsed = JSON.parse(body) as Record<string, unknown>;
+				isPaginatedGridRequest =
+					parsed.First !== undefined &&
+					parsed.Rows !== undefined;
+			} catch (_) {
+				isPaginatedGridRequest = false;
+			}
+		}
+
+		const isTargetApi =
+			isKnownSource || (!!pageSource && isPaginatedGridRequest);
 
 		// 1. Inject Filter (Strategi B)
 		if (isTargetApi && typeof body === "string") {
@@ -197,10 +219,14 @@
 					body: null,
 					rawBody: typeof currentFinalBody === "string" ? currentFinalBody : "",
 					response: respData,
-					initialData: respData?.Payload?.Data || [],
+					initialData: Array.isArray(respData?.Payload?.Data) ? respData.Payload.Data : [],
 					initialFirst: 0,
-					source: isA2 ? "SPT_A2" : (isB2 ? "SPT_B2" : (isWithholding ? "WITHHOLDING_SLIPS" : "OUTPUT_TAX"))
+					source: inferredSource || pageSource || "OUTPUT_TAX"
 				};
+
+				if (!Array.isArray(respData?.Payload?.Data)) {
+					return;
+				}
 
 				// Update global cache
 				lastCaptured = captured;
@@ -220,12 +246,21 @@
 	function interceptRequest(): Promise<CapturedRequest> {
 		return new Promise<CapturedRequest>((resolve, reject) => {
 			let resolved = false;
+			const currentPageSource = getPageExportSource();
+			const canReuseCachedRequest =
+				lastCaptured &&
+				Date.now() - lastCapturedTime < 300000 &&
+				(
+					(currentPageSource !== null && lastCaptured.source === currentPageSource) ||
+					(isSptPage() && (lastCaptured.source === "SPT_A2" || lastCaptured.source === "SPT_B2")) ||
+					(isWithholdingPage() && lastCaptured.source === "WITHHOLDING_SLIPS")
+				);
 
 			// 1. Check if we have a "warm" cache from the same portal context
-			if (lastCaptured && (Date.now() - lastCapturedTime < 300000)) { // 5 minutes fresh
+			if (canReuseCachedRequest) {
 				console.log("[Scraper] Using cached request from history.");
 				resolved = true;
-				resolve(lastCaptured);
+				resolve(lastCaptured as CapturedRequest);
 				return;
 			}
 
@@ -475,19 +510,7 @@
 				`[Scraper] ✅ Complete: ${allData.length} records in ${totalElapsed}`,
 			);
 
-			let filenameHint = "";
-			try {
-				const reqBody = JSON.parse(captured.rawBody);
-				const filterKey = "Filters" in reqBody ? "Filters" : "filters";
-				if (reqBody[filterKey] && Array.isArray(reqBody[filterKey])) {
-					const perFilter = reqBody[filterKey].find((f: any) => 
-						f.PropertyName && f.PropertyName.toLowerCase().includes("period")
-					);
-					if (perFilter && perFilter.Value) {
-						filenameHint = String(perFilter.Value).replace(/[^a-zA-Z0-9_-]/g, "");
-					}
-				}
-			} catch (_) {}
+			const filenameHint = extractFilenameHintFromBody(captured.rawBody, captured.source) || "";
 
 			if (captured.source === "WITHHOLDING_SLIPS") {
 				// Special handling for Bulk PDF Download

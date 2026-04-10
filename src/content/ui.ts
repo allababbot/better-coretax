@@ -7,40 +7,45 @@
 // Communicates via custom DOM events with main.ts.
 // ============================================================
 
-/** Check if we're on the PPN Keluaran page */
-export function isOutputTaxPage(): boolean {
-	const url = location.href;
-	const isEInvoice = url.includes("/e-invoice-portal");
-	const isKeluaran = url.includes("output-tax") || url.includes("keluaran") || url.includes("vat-out");
-	const result = isEInvoice && isKeluaran;
-	console.log(`Better Coretax: Output Tax Page check [${result}] for URL: ${url}`);
-	return result;
-}
+import {
+	isInputReturnPage,
+	isInputTaxPage,
+	isOutputReturnPage,
+	isOutputTaxPage,
+	isSptPage,
+	isSupportedExportPage,
+	isWithholdingPage,
+} from "./page-context";
 
-/** Check if we're on the SPT Masa PPN page (all tabs) */
-export function isSptPage(): boolean {
-	const url = location.href;
-	const isReturnsPortal = url.includes("/returnsheets-portal");
-	const isVAT = url.includes("value-added-tax-return");
-	const result = isReturnsPortal && isVAT;
-	console.log(`Better Coretax: SPT Page check [${result}] for URL: ${url}`);
-	return result;
-}
+export {
+	isInputReturnPage,
+	isInputTaxPage,
+	isOutputReturnPage,
+	isOutputTaxPage,
+	isSptPage,
+	isSupportedExportPage,
+	isWithholdingPage,
+};
 
-/** Check if we're on the Withholding Slips page */
-export function isWithholdingPage(): boolean {
-	const url = location.href;
-	const isWithholdingPortal = url.includes("/withholding-slips-portal");
-	const isMySlips = url.includes("my-withholding-slips");
-	const result = isWithholdingPortal && isMySlips;
-	console.log(`Better Coretax: Withholding Slips Page check [${result}] for URL: ${url}`);
-	return result;
-}
-
-/** 
+/**
  * Helper to find the "Upload Faktur" button or its container.
  */
 function findAnchorButton(): HTMLElement | null {
+	if (isInputTaxPage()) {
+		const inputTaxAnchor = document.getElementById("CreditInvoiceButtonButton");
+		return inputTaxAnchor && inputTaxAnchor.offsetParent !== null ? inputTaxAnchor : null;
+	}
+
+	if (isOutputReturnPage()) {
+		const outputReturnAnchor = document.getElementById("CancelSelectedInvoicesButton");
+		return outputReturnAnchor && outputReturnAnchor.offsetParent !== null ? outputReturnAnchor : null;
+	}
+
+	if (isInputReturnPage()) {
+		const inputReturnAnchor = document.getElementById("SubmitReturnButton");
+		return inputReturnAnchor && inputReturnAnchor.offsetParent !== null ? inputReturnAnchor : null;
+	}
+
 	const byId = document.getElementById("SubmitSelectedInvoicesButton");
 	if (byId) return byId;
 
@@ -53,6 +58,11 @@ function findAnchorButton(): HTMLElement | null {
 
 	const byIcon = document.querySelector(".pi-upload")?.closest("button");
 	if (byIcon) return byIcon as HTMLElement;
+
+	const tableHeaderAnchor = document.querySelector(
+		".p-datatable-header .float-left, .p-datatable-header, .card-header .float-left, .card-header",
+	) as HTMLElement | null;
+	if (tableHeaderAnchor && tableHeaderAnchor.offsetParent !== null) return tableHeaderAnchor;
 
 	return null;
 }
@@ -73,6 +83,46 @@ interface FloatingElements {
 }
 
 let els: FloatingElements | null = null;
+
+function isActionAnchor(el: Element | null): el is HTMLElement {
+	return !!el && el instanceof HTMLElement && (
+		el.id === "SubmitSelectedInvoicesButton" ||
+		el.id === "CreditInvoiceButtonButton" ||
+		el.id === "CancelSelectedInvoicesButton" ||
+		el.id === "SubmitReturnButton"
+	);
+}
+
+function isButtonPlacedCorrectly(btn: HTMLElement): boolean {
+	if (isInputTaxPage()) {
+		const anchor = document.getElementById("CreditInvoiceButtonButton");
+		return !!anchor && btn.nextElementSibling === anchor;
+	}
+
+	if (isOutputReturnPage()) {
+		const anchor = document.getElementById("CancelSelectedInvoicesButton");
+		return !!anchor && btn.nextElementSibling === anchor;
+	}
+
+	if (isInputReturnPage()) {
+		const anchor = document.getElementById("SubmitReturnButton");
+		return !!anchor && btn.nextElementSibling === anchor;
+	}
+
+	if (isOutputTaxPage()) {
+		const anchor = document.getElementById("SubmitSelectedInvoicesButton");
+		return !!anchor && btn.nextElementSibling === anchor;
+	}
+
+	return true;
+}
+
+function moveButtonNextToAnchor(btn: HTMLElement, anchor: HTMLElement): boolean {
+	const parent = anchor.parentElement;
+	if (!parent) return false;
+	parent.insertBefore(btn, anchor);
+	return true;
+}
 
 /** Inject the Floating Info Bar (bottom-right) */
 export function injectBadge() {
@@ -283,23 +333,38 @@ export function injectExportButton(retries = 15): void {
 		if (!btn || btn.offsetParent === null) {
 			isInjected = false;
 			if (btn) btn.remove();
+		} else if (!isButtonPlacedCorrectly(btn)) {
+			const inputTaxAnchor = isInputTaxPage()
+				? document.getElementById("CreditInvoiceButtonButton")
+				: null;
+			if (inputTaxAnchor && inputTaxAnchor.offsetParent !== null && moveButtonNextToAnchor(btn, inputTaxAnchor)) {
+				return;
+			}
+			isInjected = false;
+			btn.remove();
 		} else {
 			return;
 		}
 	}
 	
 	const isOutputTax = isOutputTaxPage();
+	const isInputTax = isInputTaxPage();
+	const isOutputReturn = isOutputReturnPage();
+	const isInputReturn = isInputReturnPage();
 	const isSpt = isSptPage();
 	const isWithholding = isWithholdingPage();
 
-	if (!isOutputTax && !isSpt && !isWithholding) return;
+	if (!isSupportedExportPage()) return;
 
 	let anchorEl: HTMLElement | null = null;
 	let insertMode: "before" | "append" = "before";
 
-	if (isOutputTax) {
+	if (isOutputTax || isInputTax || isOutputReturn || isInputReturn) {
 		anchorEl = findAnchorButton();
-		insertMode = "before";
+		insertMode =
+			anchorEl?.matches(".p-datatable-header .float-left, .p-datatable-header, .card-header .float-left, .card-header")
+				? "append"
+				: "before";
 	} else if (isSpt) {
 		const headers = Array.from(document.querySelectorAll("rshshr-nvat-la2-grid .p-datatable-header .float-left, rshshr-nvat-lb2-grid .p-datatable-header .float-left"));
 		anchorEl = headers.find(el => (el as HTMLElement).offsetParent !== null) as HTMLElement || null;

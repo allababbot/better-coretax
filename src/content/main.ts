@@ -20,6 +20,7 @@ import {
 	injectGridFilters,
 	isOutputTaxPage,
 	isSptPage,
+	isSupportedExportPage,
 	isWithholdingPage,
 	removeExportButton,
 	updatePanelComplete,
@@ -62,7 +63,7 @@ const observer = new MutationObserver(() => {
 		lastUrl = url;
 		console.log("Better Coretax: URL changed to", url);
 		onNavigate();
-	} else if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
+	} else if (isSupportedExportPage()) {
 		if (injectionTimeout) clearTimeout(injectionTimeout);
 		if (isOutputTaxPage()) {
 			// Toolbar filter handles its own retries
@@ -281,7 +282,7 @@ function startScrape(): void {
 
 function onNavigate(): void {
 	console.log("Better Coretax: Navigate event triggered. Current URL:", window.location.href);
-	if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
+	if (isSupportedExportPage()) {
 		console.log("Better Coretax: Supported page detected, ensuring injection...");
 		injectBadge();
 		injectScraper();
@@ -303,7 +304,7 @@ function init(): void {
 	injectBadge();
 	injectScraper();
 
-	if (isOutputTaxPage() || isSptPage() || isWithholdingPage()) {
+	if (isSupportedExportPage()) {
 		console.log("Better Coretax: Page match found on init.");
 		injectExportButton();
 		if (isOutputTaxPage()) {
