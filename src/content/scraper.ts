@@ -95,6 +95,49 @@ import {
 
 	// ── Send message to content.js ──────────────────────
 
+	function getVisibleGridSource(): ExportSource | null {
+		const grids: { tag: string; source: ExportSource }[] = [
+			{ tag: "rshshr-art2126-l1a-grid", source: "PPH_21_L1A" },
+			{ tag: "rshshr-art2126-l1b-grid", source: "PPH_21_L1B" },
+			{ tag: "rshshr-art2126-l2-grid", source: "PPH_21_L2" },
+			{ tag: "rshshr-art2126-l3-grid", source: "PPH_21_L3" },
+			{ tag: "rshshr-nvat-la2-grid", source: "SPT_A2" },
+			{ tag: "rshshr-nvat-lb2-grid", source: "SPT_B2" },
+		];
+		for (const g of grids) {
+			const el = document.querySelector(g.tag) as HTMLElement;
+			if (el && el.offsetParent !== null) return g.source;
+		}
+		return null;
+	}
+
+	function getMasaPajakFromDOM(): string {
+		const labels = Array.from(document.querySelectorAll("label"));
+		const masaLabel = labels.find((el) => {
+			const txt = el.textContent?.toUpperCase() || "";
+			return txt.includes("MASA PAJAK") && (txt.includes("MM") || txt.includes("YYYY"));
+		}) || labels.find((el) => el.textContent?.toUpperCase().includes("MASA PAJAK"));
+
+		if (masaLabel) {
+			const container = masaLabel.closest(".form-group.row") || masaLabel.parentElement;
+			if (container) {
+				// 1. Try input first
+				const input = container.querySelector("input") as HTMLInputElement;
+				if (input && input.value) return input.value.trim();
+
+				// 2. Try any component with text content that looks like MM-YYYY or MM/YYYY
+				const text = container.textContent || "";
+				const match = text.match(/(\d{2}[-/]\d{4})/);
+				if (match) return match[1];
+
+				// 3. Fallback to last child text
+				const lastChild = container.lastElementChild;
+				if (lastChild && lastChild.textContent) return lastChild.textContent.trim();
+			}
+		}
+		return "";
+	}
+
 	function sendToContent(msg: ScrapeMessage): void {
 		try {
 			window.postMessage({ ...msg, direction: "FROM_PAGE" }, "*");
@@ -246,13 +289,14 @@ import {
 	function interceptRequest(): Promise<CapturedRequest> {
 		return new Promise<CapturedRequest>((resolve, reject) => {
 			let resolved = false;
-			const currentPageSource = getPageExportSource();
+			const visibleSource = getVisibleGridSource();
 			const canReuseCachedRequest =
 				lastCaptured &&
 				Date.now() - lastCapturedTime < 300000 &&
 				(
+					// Ensure we only reuse if the source matches EXACTLY what is currently on screen
+					(visibleSource !== null && lastCaptured.source === visibleSource) ||
 					(currentPageSource !== null && lastCaptured.source === currentPageSource) ||
-					(isSptPage() && (lastCaptured.source === "SPT_A2" || lastCaptured.source === "SPT_B2")) ||
 					(isWithholdingPage() && lastCaptured.source === "WITHHOLDING_SLIPS")
 				);
 
@@ -430,7 +474,10 @@ import {
 			let errorCount = 0;
 			const startTime = Date.now();
 
-			const isSpt = captured.source === "SPT_A2" || captured.source === "SPT_B2";
+			const isSpt =
+				captured.source === "SPT_A2" ||
+				captured.source === "SPT_B2" ||
+				captured.source.startsWith("PPH_21_");
 			// Boost OutputTax (e-faktur) step to 500 per page and reduce delay to 100ms
 			const step = isSpt ? 1000 : 500;
 			const delayMs = isSpt ? 150 : 100;
@@ -510,7 +557,13 @@ import {
 				`[Scraper] ✅ Complete: ${allData.length} records in ${totalElapsed}`,
 			);
 
-			const filenameHint = extractFilenameHintFromBody(captured.rawBody, captured.source) || "";
+			let filenameHint = extractFilenameHintFromBody(captured.rawBody, captured.source) || "";
+
+			// If body doesn't have it (PPh 21/26), try DOM header
+			if (!filenameHint && captured.source.startsWith("PPH_21_")) {
+				filenameHint = getMasaPajakFromDOM();
+				console.log("[Scraper] Filename hint from DOM:", filenameHint);
+			}
 
 			if (captured.source === "WITHHOLDING_SLIPS") {
 				// Special handling for Bulk PDF Download

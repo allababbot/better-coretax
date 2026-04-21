@@ -5,6 +5,10 @@ export type ExportSource =
 	| "INPUT_RETURN"
 	| "SPT_A2"
 	| "SPT_B2"
+	| "PPH_21_L1A"
+	| "PPH_21_L1B"
+	| "PPH_21_L2"
+	| "PPH_21_L3"
 	| "WITHHOLDING_SLIPS";
 
 type FilterLike = {
@@ -47,7 +51,8 @@ export function isSptPage(url = location.href): boolean {
 	const normalizedUrl = normalizeUrl(url);
 	return (
 		normalizedUrl.includes("/returnsheets-portal") &&
-		normalizedUrl.includes("value-added-tax-return")
+		(normalizedUrl.includes("value-added-tax-return") ||
+			normalizedUrl.includes("article-21-26-tax-return"))
 	);
 }
 
@@ -83,6 +88,10 @@ export function inferCapturedSource(requestUrl: string, pageUrl = location.href)
 
 	if (normalizedRequestUrl.includes("la2-grid")) return "SPT_A2";
 	if (normalizedRequestUrl.includes("lb2-grid")) return "SPT_B2";
+	if (normalizedRequestUrl.includes("l1a-")) return "PPH_21_L1A";
+	if (normalizedRequestUrl.includes("l1b-")) return "PPH_21_L1B";
+	if (normalizedRequestUrl.includes("l2-")) return "PPH_21_L2";
+	if (normalizedRequestUrl.includes("l3-")) return "PPH_21_L3";
 	if (normalizedRequestUrl.includes("getmywithholdingslip")) return "WITHHOLDING_SLIPS";
 	if (normalizedRequestUrl.includes("outputinvoice/list")) return "OUTPUT_TAX";
 
@@ -163,7 +172,12 @@ export function extractFilenameHintFromBody(
 			return year || undefined;
 		}
 
-		if (source === "OUTPUT_TAX" || source === "SPT_A2" || source === "SPT_B2") {
+		if (
+			source === "OUTPUT_TAX" ||
+			source === "SPT_A2" ||
+			source === "SPT_B2" ||
+			source.startsWith("PPH_21_")
+		) {
 			const value = findFirstFilterValue(filters, ["period", "masa"]);
 			return value ? value.replace(/[^a-zA-Z0-9_-]/g, "") : undefined;
 		}

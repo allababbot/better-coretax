@@ -106,7 +106,7 @@ function processData(exportData: ExportData): ExportData {
 		return { data: processedData, fields: a2Fields, source: exportData.source };
 	}
 
-	if (exportData.source === "SPT_B2") {
+	if (exportData.source === "SPT_B2" || (exportData.source && exportData.source.startsWith("PPH_21_"))) {
 		// Dump all fields for B2 dynamically
 		const processedData = exportData.data.map((row) => {
 			const newRow: Record<string, unknown> = {};
@@ -195,7 +195,15 @@ function generateDynamicFilename(exportData: ExportData): string {
 					? "RET-FPM-"
 					: isA2
 						? "A2-"
-						: "FPK-";
+						: source === "PPH_21_L1A"
+							? "PPH21-L1A-"
+							: source === "PPH_21_L1B"
+								? "PPH21-L1B-"
+								: source === "PPH_21_L2"
+									? "PPH21-L2-"
+									: source === "PPH_21_L3"
+										? "PPH21-L3-"
+										: "FPK-";
 
 	const formatPeriod = (p: string) => {
 		// 1. Handle internal format YYYY_MM
@@ -239,11 +247,15 @@ function generateDynamicFilename(exportData: ExportData): string {
 		}
 
 		const formatted = formatPeriod(filenameHint);
-		if (/^\d{6}$/.test(formatted)) {
+		// If it's 6 digits (MMYYYY) or 4 digits (YYYY), use it
+		if (/^\d{6}$/.test(formatted) || /^\d{4}$/.test(formatted)) {
 			return `${prefix}${formatted}`;
 		}
-		const digits = formatted.replace(/\D/g, "");
-		if (digits.length === 6) return `${prefix}${digits}`;
+		
+		// Fallback for PPh 21 if we have any digits
+		if (source.startsWith("PPH_21_") && formatted.length >= 4) {
+			return `${prefix}${formatted}`;
+		}
 	}
 
 	// Helper to get periods from data rows

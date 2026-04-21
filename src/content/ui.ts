@@ -366,8 +366,24 @@ export function injectExportButton(retries = 15): void {
 				? "append"
 				: "before";
 	} else if (isSpt) {
-		const headers = Array.from(document.querySelectorAll("rshshr-nvat-la2-grid .p-datatable-header .float-left, rshshr-nvat-lb2-grid .p-datatable-header .float-left"));
-		anchorEl = headers.find(el => (el as HTMLElement).offsetParent !== null) as HTMLElement || null;
+		const activeTab = document.querySelector(".p-tabview-nav li.p-highlight");
+		const tabText = activeTab?.textContent?.trim().toLowerCase() || "";
+		if (tabText.includes("induk")) {
+			removeExportButton();
+			return;
+		}
+
+		const headers = Array.from(
+			document.querySelectorAll(`
+			rshshr-nvat-la2-grid .p-datatable-header .float-left, 
+			rshshr-nvat-lb2-grid .p-datatable-header .float-left,
+			rshshr-art2126-l1a-grid .p-datatable-header .float-left,
+			rshshr-art2126-l1b-grid .p-datatable-header .float-left,
+			rshshr-art2126-l2-grid .p-datatable-header .float-left,
+			rshshr-art2126-l3-grid .p-datatable-header .float-left
+		`),
+		);
+		anchorEl = (headers.find((el) => (el as HTMLElement).offsetParent !== null) as HTMLElement) || null;
 		insertMode = "append";
 	} else if (isWithholding) {
 		const headers = Array.from(document.querySelectorAll(".p-datatable-header .float-left, .card-header .float-left"));
