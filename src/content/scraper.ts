@@ -290,6 +290,7 @@ import {
 		return new Promise<CapturedRequest>((resolve, reject) => {
 			let resolved = false;
 			const visibleSource = getVisibleGridSource();
+			const currentPageSource = getPageExportSource();
 			const canReuseCachedRequest =
 				lastCaptured &&
 				Date.now() - lastCapturedTime < 300000 &&
