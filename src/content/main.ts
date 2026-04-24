@@ -29,7 +29,7 @@ import {
 	updatePanelProgress,
 	injectToolbarFilter,
 } from "./ui";
-import { base64ToBlob, downloadBlob, generateWithholdingFilename } from "./downloader";
+import { base64ToBlob, downloadBlob, generateOutputTaxFilename, generateWithholdingFilename } from "./downloader";
 
 console.log("better coretax aktif");
 
@@ -55,26 +55,29 @@ let scrapedData: Record<string, unknown>[] | null = null;
 let scrapedFields: string[] | null = null;
 
 let lastUrl = location.href;
-let injectionTimeout: any = null;
+let debounceTimer: any = null;
 
 const observer = new MutationObserver(() => {
 	const url = location.href;
 	if (url !== lastUrl) {
 		lastUrl = url;
 		console.log("Better Coretax: URL changed to", url);
+		if (debounceTimer) clearTimeout(debounceTimer);
 		onNavigate();
-	} else if (isSupportedExportPage()) {
-		if (injectionTimeout) clearTimeout(injectionTimeout);
-		if (isOutputTaxPage()) {
-			// Toolbar filter handles its own retries
-			injectToolbarFilter();
-			injectionTimeout = setTimeout(() => {
-				injectGridFilters();
-			}, 300); 
-		}
-		// Always safely attempt to reinject the button if we arrive here
-		injectExportButton();
+		return;
 	}
+
+	if (!isSupportedExportPage()) return;
+
+	// Debounce injections to avoid fighting with SPA/Angular rendering
+	if (debounceTimer) clearTimeout(debounceTimer);
+	debounceTimer = setTimeout(() => {
+		if (isOutputTaxPage()) {
+			injectToolbarFilter();
+			injectGridFilters();
+		}
+		injectExportButton();
+	}, 300);
 });
 
 observer.observe(document.body, { subtree: true, childList: true });
@@ -185,10 +188,12 @@ window.addEventListener("message", (event: MessageEvent) => {
 	}
 
 	if (cleanMsg.type === "DOWNLOAD_PDF_ITEM") {
-		const { base64, item } = cleanMsg;
+		const { base64, item, source } = cleanMsg;
 		try {
 			const blob = base64ToBlob(base64);
-			const filename = generateWithholdingFilename(item);
+			const filename = source === "OUTPUT_TAX" 
+				? generateOutputTaxFilename(item)
+				: generateWithholdingFilename(item);
 			downloadBlob(blob, filename);
 		} catch (err) {
 			console.error("Better Coretax: Gagal memproses download file", err);

@@ -153,6 +153,67 @@ import {
 	const origOpen = XMLHttpRequest.prototype.open;
 	const origSend = XMLHttpRequest.prototype.send;
 	const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+	
+	// ── Global Download Interceptor (to prevent double download) ──
+	let isProcessingBetterDownload = false;
+	const origAnchorClick = HTMLAnchorElement.prototype.click;
+	HTMLAnchorElement.prototype.click = function(this: HTMLAnchorElement) {
+		if (isProcessingBetterDownload && (this.download || this.href.startsWith("blob:"))) {
+			console.log("[Better Coretax] Memblokir download klik bawaan.");
+			isProcessingBetterDownload = false; 
+			return;
+		}
+		return origAnchorClick.apply(this);
+	};
+
+	const origCreateObjectURL = window.URL.createObjectURL;
+	window.URL.createObjectURL = function(obj: any) {
+		if (isProcessingBetterDownload && obj instanceof Blob && obj.type === "application/pdf") {
+			console.log("[Better Coretax] Memblokir pembuatan blob URL bawaan.");
+			// isProcessingBetterDownload = false; // Don't reset yet, might be multiple calls
+			return "javascript:void(0)"; 
+		}
+		return origCreateObjectURL(obj);
+	};
+
+	const origWindowOpen = window.open;
+	window.open = function(...args: any[]) {
+		if (isProcessingBetterDownload) {
+			console.log("[Better Coretax] Memblokir window.open bawaan.");
+			return null;
+		}
+		return origWindowOpen.apply(window, args);
+	};
+
+	// ── Fetch Interceptor (Backup) ──
+	const origFetch = window.fetch;
+	window.fetch = async function(...args: any[]) {
+		const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+		if (url && url.includes("DownloadInvoice/download-invoice-document")) {
+			isProcessingBetterDownload = true;
+			setTimeout(() => { isProcessingBetterDownload = false; }, 5000);
+			
+			const resp = await origFetch.apply(window, args as any);
+			const clonedResp = resp.clone();
+			const json = await clonedResp.json();
+			
+			// Trigger our download
+			window.postMessage({
+				type: "DOWNLOAD_PDF_ITEM",
+				base64: json.Content || json.Payload?.Content || json.Payload?.Message?.Data,
+				item: {}, // Mapping is harder here, but we try
+				source: "OUTPUT_TAX",
+				direction: "FROM_PAGE"
+			}, "*");
+
+			// Return "Empty" response to page to block native download
+			return new Response(JSON.stringify({ IsSuccessful: true, Content: "" }), {
+				status: 200,
+				headers: resp.headers
+			});
+		}
+		return origFetch.apply(window, args as any);
+	};
 
 	const filterState: Record<string, any> = {};
 	const captureSubscribers: ((req: CapturedRequest) => void)[] = [];
@@ -279,6 +340,61 @@ import {
 				captureSubscribers.length = 0;
 				subs.forEach(s => s(captured));
 			});
+		}
+
+		// 3. Intercept Output Tax PDF Download
+		if (xhr.__url?.includes("DownloadInvoice/download-invoice-document")) {
+			const currentFinalBody = finalBody;
+			
+			// Use readystatechange with capture to be as early as possible
+			xhr.addEventListener("readystatechange", function(this: XMLHttpRequest) {
+				if (this.readyState === 4 && this.status === 200) {
+					try {
+						// Mark that we are handling this download
+						isProcessingBetterDownload = true;
+						// Auto reset flag after 5 seconds
+						setTimeout(() => { isProcessingBetterDownload = false; }, 5000);
+
+						const rawText = this.responseText;
+						const resp = JSON.parse(rawText);
+						const pdfData = resp.Content || resp.Payload?.Content || resp.Payload?.Message?.Data || resp.Payload?.Data;
+						
+						// SABOTAGE DATA & STATUS so the native script thinks it failed or got nothing
+						try {
+							const dummyResp = JSON.stringify({ IsSuccessful: false, Message: "Blocked", Content: "", Payload: null });
+							Object.defineProperty(this, 'responseText', { get: () => dummyResp, configurable: true });
+							Object.defineProperty(this, 'response', { get: () => dummyResp, configurable: true });
+							Object.defineProperty(this, 'status', { get: () => 500, configurable: true });
+							Object.defineProperty(this, 'statusText', { get: () => "Internal Server Error (Blocked by Better Coretax)", configurable: true });
+						} catch (e) { /* ignore defineProperty errors */ }
+
+						if (pdfData && typeof currentFinalBody === "string") {
+							const payload = JSON.parse(currentFinalBody);
+							const recordId = payload.EInvoiceRecordIdentifier;
+							
+							// Try to find matching row in cached data to get Reference
+							let item: any = payload;
+							if (lastCaptured && Array.isArray(lastCaptured.response?.Payload?.Data)) {
+								const found = lastCaptured.response.Payload.Data.find((d: any) => 
+									d.RecordId === recordId || d.EInvoiceRecordIdentifier === recordId
+								);
+								if (found) item = { ...item, ...found };
+							}
+
+							console.log("[Scraper] PDF Terdeteksi & Data Asli dihapus. Mengirim ke Better Coretax...");
+							window.postMessage({
+								type: "DOWNLOAD_PDF_ITEM",
+								base64: pdfData,
+								item: item,
+								source: "OUTPUT_TAX",
+								direction: "FROM_PAGE"
+							}, "*");
+						}
+					} catch (e) {
+						console.error("Better Coretax [Scraper]: Gagal memproses intercept PDF", e);
+					}
+				}
+			}, true);
 		}
 
 		return origSend.call(this, finalBody);

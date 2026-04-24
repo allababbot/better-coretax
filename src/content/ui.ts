@@ -223,7 +223,7 @@ export function injectGridFilters(): void {
 	const mainHeaderRow = headerRows[0] as HTMLTableRowElement;
 	const filterRow = headerRows[1] as HTMLTableRowElement;
 
-	if (filterRow.querySelector("#ch-filter-reference")) return;
+	if (filterRow.querySelector("#ch-grid-filter-reference")) return;
 
 	const refIdx = findColumnIndex(mainHeaderRow, ["Referensi", "Reference"]);
 	if (refIdx === -1) return;

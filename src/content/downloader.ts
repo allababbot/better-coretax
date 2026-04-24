@@ -56,3 +56,19 @@ export function generateWithholdingFilename(item: WithholdingSlip): string {
 
 	return `${month}-${year}-${nomor}-${nama}.pdf`;
 }
+
+/**
+ * Formats Output Tax PDF filename as Reference - InvoiceNumber.pdf
+ */
+export function generateOutputTaxFilename(item: any, reference?: string): string {
+	const ref = (reference || item.Reference || "TANPA_REFERENSI")
+		.replace(/[/\\?%*:|"<>]/g, "-")
+		.trim();
+	
+	const invoiceNumber = (item.LetterNumber || item.TaxInvoiceNumber || "000")
+		.replace(/[/\\?%*:|"<>]/g, "-")
+		.trim();
+
+	return `${ref} - ${invoiceNumber}.pdf`;
+}
+
