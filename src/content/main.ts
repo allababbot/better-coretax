@@ -13,23 +13,23 @@
 const _browser = typeof browser !== "undefined" ? browser : (globalThis as any).chrome;
 const browserAPI: any = _browser;
 
-import { type ExportData, exportXLSX } from "./exporter";
+import { type ExportData, exportXLSX, exportCSV } from "./exporter";
 import {
 	injectBadge,
 	injectExportButton,
 	injectGridFilters,
 	isOutputTaxPage,
-	isSptPage,
 	isSupportedExportPage,
-	isWithholdingPage,
 	removeExportButton,
+	showPanel,
 	updatePanelComplete,
 	updatePanelError,
 	updatePanelIdle,
 	updatePanelProgress,
 	injectToolbarFilter,
 } from "./ui";
-import { base64ToBlob, downloadBlob, generateOutputTaxFilename, generateWithholdingFilename } from "./downloader";
+import { handlePdfDownload } from "./downloader";
+import { registerShortcuts } from "./shortcuts";
 
 console.log("better coretax aktif");
 
@@ -53,6 +53,7 @@ let lastState: ScrapeState | null = null;
 let isRunning = false;
 let scrapedData: Record<string, unknown>[] | null = null;
 let scrapedFields: string[] | null = null;
+let lastExportMeta: { filenameHint?: string; source?: string } | null = null;
 
 let lastUrl = location.href;
 let debounceTimer: any = null;
@@ -103,7 +104,7 @@ function sendToPopup(msg: Record<string, unknown>): void {
 		browserAPI.runtime.sendMessage(msg).catch(() => {
 			// Popup closed or extension context invalidated
 		});
-	} catch (_) {
+	} catch {
 		// Extension context invalidated or popup closed
 	}
 }
@@ -113,7 +114,7 @@ function sendToPopup(msg: Record<string, unknown>): void {
 browserAPI.runtime.onMessage.addListener(
 	(msg: Record<string, any>, _sender: any, sendResponse: (response?: any) => void) => {
 		if (msg.type === "START_SCRAPE" || msg.type === "STOP_SCRAPE") {
-			window.postMessage({ ...msg, direction: "FROM_CONTENT" }, "*");
+			window.postMessage({ ...msg, direction: "FROM_CONTENT" }, window.location.origin);
 			if (msg.type === "START_SCRAPE") {
 				isRunning = true;
 				lastState = {
@@ -141,9 +142,11 @@ browserAPI.runtime.onMessage.addListener(
 
 window.addEventListener("message", (event: MessageEvent) => {
 	if (event.source !== window) return;
+	if (event.origin !== window.location.origin) return;
 	if (!event.data || event.data.direction !== "FROM_PAGE") return;
 
-	const { direction: _, ...cleanMsg } = event.data;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	const { direction: _direction, ...cleanMsg } = event.data;
 
 	// Store state for reconnection
 	if (
@@ -168,33 +171,19 @@ window.addEventListener("message", (event: MessageEvent) => {
 		isRunning = false;
 		scrapedData = cleanMsg.data || null;
 		scrapedFields = cleanMsg.fields || null;
+		// @ts-ignore
+		lastExportMeta = { filenameHint: cleanMsg.filenameHint, source: cleanMsg.source };
 		updatePanelComplete(
 			cleanMsg.total || 0,
 			cleanMsg.pages || 0,
 			cleanMsg.elapsed || "0s",
 		);
-
-		if (scrapedData && scrapedFields && cleanMsg.source !== "WITHHOLDING_SLIPS") {
-			const exportData: ExportData = {
-				data: scrapedData,
-				fields: scrapedFields,
-				// @ts-ignore
-				filenameHint: cleanMsg.filenameHint,
-				// @ts-ignore
-				source: cleanMsg.source
-			};
-			exportXLSX(exportData);
-		}
 	}
 
 	if (cleanMsg.type === "DOWNLOAD_PDF_ITEM") {
 		const { base64, item, source } = cleanMsg;
 		try {
-			const blob = base64ToBlob(base64);
-			const filename = source === "OUTPUT_TAX" 
-				? generateOutputTaxFilename(item)
-				: generateWithholdingFilename(item);
-			downloadBlob(blob, filename);
+			handlePdfDownload(base64, item as Record<string, unknown>, source);
 		} catch (err) {
 			console.error("Better Coretax: Gagal memproses download file", err);
 		}
@@ -224,7 +213,7 @@ document.addEventListener("keyup", (e: KeyboardEvent) => {
 					value: value.toUpperCase(),
 					direction: "FROM_CONTENT",
 				},
-				"*",
+				window.location.origin,
 			);
 
 			// Trigger a search by clicking the "Cari" or "Refresh" button
@@ -252,12 +241,44 @@ document.addEventListener("keyup", (e: KeyboardEvent) => {
 document.addEventListener("ch:scrape-toggle", () => {
 	if (isRunning) {
 		// Stop
-		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, "*");
+		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, window.location.origin);
 		isRunning = false;
 		updatePanelIdle();
 	} else {
 		startScrape();
 	}
+});
+
+// Export XLSX with last scraped data
+document.addEventListener("ch:export-xlsx", () => {
+	if (!scrapedData || !scrapedFields) {
+		console.warn("Better Coretax: No scraped data available for XLSX export");
+		return;
+	}
+	const exportData: ExportData = {
+		data: scrapedData,
+		fields: scrapedFields,
+		filenameHint: lastExportMeta?.filenameHint,
+		// @ts-ignore
+		source: lastExportMeta?.source,
+	};
+	exportXLSX(exportData);
+});
+
+// Export CSV with last scraped data
+document.addEventListener("ch:export-csv", () => {
+	if (!scrapedData || !scrapedFields) {
+		console.warn("Better Coretax: No scraped data available for CSV export");
+		return;
+	}
+	const exportData: ExportData = {
+		data: scrapedData,
+		fields: scrapedFields,
+		filenameHint: lastExportMeta?.filenameHint,
+		// @ts-ignore
+		source: lastExportMeta?.source,
+	};
+	exportCSV(exportData);
 });
 
 // Auto-start scrape (only starts if not already running, never stops)
@@ -267,9 +288,11 @@ document.addEventListener("ch:scrape-start", () => {
 });
 
 function startScrape(): void {
+	showPanel();
 	isRunning = true;
 	scrapedData = null;
 	scrapedFields = null;
+	lastExportMeta = null;
 	lastState = {
 		type: "SCRAPE_PROGRESS",
 		total: 0,
@@ -278,7 +301,7 @@ function startScrape(): void {
 		status: "Menunggu...",
 	};
 	updatePanelProgress(0, 0, "0s", "Menangkap request dari Angular...");
-	window.postMessage({ type: "START_SCRAPE", direction: "FROM_CONTENT" }, "*");
+	window.postMessage({ type: "START_SCRAPE", direction: "FROM_CONTENT" }, window.location.origin);
 }
 
 
@@ -308,6 +331,7 @@ function init(): void {
 	console.log("Better Coretax: Extension starting up on page...", window.location.href);
 	injectBadge();
 	injectScraper();
+	registerShortcuts(() => isRunning);
 
 	if (isSupportedExportPage()) {
 		console.log("Better Coretax: Page match found on init.");

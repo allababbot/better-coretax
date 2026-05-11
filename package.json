@@ -11,7 +11,9 @@
     "package:chrome": "node build.js --browser=chrome && node package.js --browser=chrome",
     "package:firefox": "node build.js --browser=firefox && node package.js --browser=firefox",
     "package": "npm run package:chrome && npm run package:firefox",
-    "package:source": "node package-source.js"
+    "package:source": "node package-source.js",
+    "test": "vitest --run",
+    "lint": "eslint src/**/*.ts"
   },
   "keywords": [
     "firefox",
@@ -22,11 +24,16 @@
   "license": "ISC",
   "devDependencies": {
     "@types/firefox-webext-browser": "^120.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
     "archiver": "^7.0.1",
     "esbuild": "^0.20.1",
-    "typescript": "^5.3.3"
+    "eslint": "^10.3.0",
+    "fast-check": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
-    "xlsx": "^0.18.5"
+    "xlsx": "0.18.5"
   }
 }

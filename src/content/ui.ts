@@ -71,7 +71,9 @@ function findAnchorButton(): HTMLElement | null {
 
 let badgeEl: HTMLDivElement | null = null;
 let statsEl: HTMLDivElement | null = null;
-let exportBtnEl: HTMLButtonElement | null = null;
+let exportBtnEl: HTMLButtonElement | null = null;  // withholding page: single "Bulk Download PDF" button
+let xlsxBtnEl: HTMLButtonElement | null = null;    // non-withholding: "Export XLSX" button
+let csvBtnEl: HTMLButtonElement | null = null;     // non-withholding: "Export CSV" button
 let isInjected = false;
 
 interface FloatingElements {
@@ -83,15 +85,6 @@ interface FloatingElements {
 }
 
 let els: FloatingElements | null = null;
-
-function isActionAnchor(el: Element | null): el is HTMLElement {
-	return !!el && el instanceof HTMLElement && (
-		el.id === "SubmitSelectedInvoicesButton" ||
-		el.id === "CreditInvoiceButtonButton" ||
-		el.id === "CancelSelectedInvoicesButton" ||
-		el.id === "SubmitReturnButton"
-	);
-}
 
 function isButtonPlacedCorrectly(btn: HTMLElement): boolean {
 	if (isInputTaxPage()) {
@@ -179,11 +172,29 @@ export function injectBadge() {
 	statsEl.appendChild(statusText);
 	statsEl.appendChild(progressContainer);
 
+	// Add dismiss button (×) after progress container
+	const dismissBtn = document.createElement("button");
+	dismissBtn.id = "ch-dismiss-btn";
+	dismissBtn.className = "ch-dismiss-btn";
+	dismissBtn.textContent = "×";
+	dismissBtn.addEventListener("click", () => {
+		statsEl?.classList.add("ch-hidden");
+	});
+	statsEl.appendChild(dismissBtn);
+
 	// Create badge element
 	badgeEl = document.createElement("div");
 	badgeEl.id = "ch-badge";
 	badgeEl.className = "ch-badge";
 	badgeEl.textContent = "BC";
+
+	// Wire badge click → show panel only if currently hidden (no-op if already visible)
+	badgeEl.addEventListener("click", () => {
+		if (statsEl && statsEl.classList.contains("ch-hidden")) {
+			statsEl.classList.remove("ch-hidden");
+		}
+		// No action if already visible (Req 4.5)
+	});
 
 	container.appendChild(statsEl);
 	container.appendChild(badgeEl);
@@ -196,6 +207,14 @@ export function injectBadge() {
 		statTime: timeStat.val,
 		progressBar,
 	};
+}
+
+/**
+ * Show the floating stats panel (removes ch-hidden).
+ * Called at the start of every operation to auto-show the panel (Req 4.6).
+ */
+export function showPanel(): void {
+	statsEl?.classList.remove("ch-hidden");
 }
 
 /**
@@ -328,22 +347,42 @@ export function injectToolbarFilter(retries = 15): void {
  * Inject the "Better Export" button into the toolbar.
  */
 export function injectExportButton(retries = 15): void {
+	// Check if buttons are already injected
 	if (isInjected) {
-		const btn = document.getElementById("ch-export-btn");
-		if (!btn || btn.offsetParent === null) {
-			isInjected = false;
-			if (btn) btn.remove();
-		} else if (!isButtonPlacedCorrectly(btn)) {
-			const inputTaxAnchor = isInputTaxPage()
-				? document.getElementById("CreditInvoiceButtonButton")
-				: null;
-			if (inputTaxAnchor && inputTaxAnchor.offsetParent !== null && moveButtonNextToAnchor(btn, inputTaxAnchor)) {
+		const xlsxBtn = document.getElementById("ch-export-xlsx-btn");
+		const csvBtn = document.getElementById("ch-export-csv-btn");
+		const singleBtn = document.getElementById("ch-export-btn");
+		
+		// For non-withholding pages, check both XLSX and CSV buttons
+		if (!isWithholdingPage()) {
+			if (!xlsxBtn || xlsxBtn.offsetParent === null || !csvBtn || csvBtn.offsetParent === null) {
+				isInjected = false;
+				if (xlsxBtn) xlsxBtn.remove();
+				if (csvBtn) csvBtn.remove();
+			} else if (!isButtonPlacedCorrectly(xlsxBtn)) {
+				const inputTaxAnchor = isInputTaxPage()
+					? document.getElementById("CreditInvoiceButtonButton")
+					: null;
+				if (inputTaxAnchor && inputTaxAnchor.offsetParent !== null && moveButtonNextToAnchor(xlsxBtn, inputTaxAnchor)) {
+					return;
+				}
+				isInjected = false;
+				xlsxBtn.remove();
+				if (csvBtn) csvBtn.remove();
+			} else {
 				return;
 			}
-			isInjected = false;
-			btn.remove();
 		} else {
-			return;
+			// For withholding pages, check single button
+			if (!singleBtn || singleBtn.offsetParent === null) {
+				isInjected = false;
+				if (singleBtn) singleBtn.remove();
+			} else if (!isButtonPlacedCorrectly(singleBtn)) {
+				isInjected = false;
+				singleBtn.remove();
+			} else {
+				return;
+			}
 		}
 	}
 	
@@ -400,39 +439,105 @@ export function injectExportButton(retries = 15): void {
 	if (!containerNode) return;
 
 	isInjected = true;
-	exportBtnEl = document.createElement("button");
-	exportBtnEl.id = "ch-export-btn";
-	exportBtnEl.type = "button";
-	exportBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
-	Object.assign(exportBtnEl.style, {
-		backgroundColor: "#ff5722",
-		borderColor: "#ff5722",
-		color: "white"
-	});
-	
-	const icon = document.createElement("span");
-	icon.className = "p-button-icon p-button-icon-left pi pi-download";
-	icon.setAttribute("aria-hidden", "true");
-	
-	const label = document.createElement("span");
-	label.className = "p-button-label";
-	label.textContent = isWithholding ? "Bulk Download PDF" : "Better Export";
-	
-	exportBtnEl.appendChild(icon);
-	exportBtnEl.appendChild(label);
 
-	if (insertMode === "before") {
-		containerNode.insertBefore(exportBtnEl, anchorEl);
+	// For withholding pages: single "Bulk Download PDF" button
+	if (isWithholding) {
+		exportBtnEl = document.createElement("button");
+		exportBtnEl.id = "ch-export-btn";
+		exportBtnEl.type = "button";
+		exportBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
+		Object.assign(exportBtnEl.style, {
+			backgroundColor: "#ff5722",
+			borderColor: "#ff5722",
+			color: "white"
+		});
+		
+		const icon = document.createElement("span");
+		icon.className = "p-button-icon p-button-icon-left pi pi-download";
+		icon.setAttribute("aria-hidden", "true");
+		
+		const label = document.createElement("span");
+		label.className = "p-button-label";
+		label.textContent = "Bulk Download PDF";
+		
+		exportBtnEl.appendChild(icon);
+		exportBtnEl.appendChild(label);
+
+		if (insertMode === "before") {
+			containerNode.insertBefore(exportBtnEl, anchorEl);
+		} else {
+			containerNode.appendChild(exportBtnEl);
+		}
+
+		// Dispatch ch:scrape-toggle for withholding page
+		exportBtnEl.addEventListener("click", (e: MouseEvent) => {
+			e.stopPropagation();
+			document.dispatchEvent(new CustomEvent("ch:scrape-toggle"));
+		});
 	} else {
-		containerNode.appendChild(exportBtnEl);
-	}
+		// For non-withholding pages: two buttons (XLSX + CSV)
+		xlsxBtnEl = document.createElement("button");
+		xlsxBtnEl.id = "ch-export-xlsx-btn";
+		xlsxBtnEl.type = "button";
+		xlsxBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
+		Object.assign(xlsxBtnEl.style, {
+			backgroundColor: "#ff5722",
+			borderColor: "#ff5722",
+			color: "white"
+		});
+		
+		const xlsxIcon = document.createElement("span");
+		xlsxIcon.className = "p-button-icon p-button-icon-left pi pi-file-excel";
+		xlsxIcon.setAttribute("aria-hidden", "true");
+		
+		const xlsxLabel = document.createElement("span");
+		xlsxLabel.className = "p-button-label";
+		xlsxLabel.textContent = "Export XLSX";
+		
+		xlsxBtnEl.appendChild(xlsxIcon);
+		xlsxBtnEl.appendChild(xlsxLabel);
 
-	// ── Event: Direct Start Scrape ──
-	exportBtnEl.addEventListener("click", (e: MouseEvent) => {
-		e.stopPropagation();
-		// Directly toggle scraping, no dropdown
-		document.dispatchEvent(new CustomEvent("ch:scrape-toggle"));
-	});
+		csvBtnEl = document.createElement("button");
+		csvBtnEl.id = "ch-export-csv-btn";
+		csvBtnEl.type = "button";
+		csvBtnEl.className = "p-element btn ct-btn-group mr-1 p-button p-component ch-btn-highlight";
+		Object.assign(csvBtnEl.style, {
+			backgroundColor: "#ff5722",
+			borderColor: "#ff5722",
+			color: "white"
+		});
+		
+		const csvIcon = document.createElement("span");
+		csvIcon.className = "p-button-icon p-button-icon-left pi pi-file";
+		csvIcon.setAttribute("aria-hidden", "true");
+		
+		const csvLabel = document.createElement("span");
+		csvLabel.className = "p-button-label";
+		csvLabel.textContent = "Export CSV";
+		
+		csvBtnEl.appendChild(csvIcon);
+		csvBtnEl.appendChild(csvLabel);
+
+		// Insert both buttons
+		if (insertMode === "before") {
+			containerNode.insertBefore(xlsxBtnEl, anchorEl);
+			containerNode.insertBefore(csvBtnEl, anchorEl);
+		} else {
+			containerNode.appendChild(xlsxBtnEl);
+			containerNode.appendChild(csvBtnEl);
+		}
+
+		// Wire up event handlers
+		xlsxBtnEl.addEventListener("click", (e: MouseEvent) => {
+			e.stopPropagation();
+			document.dispatchEvent(new CustomEvent("ch:export-xlsx"));
+		});
+
+		csvBtnEl.addEventListener("click", (e: MouseEvent) => {
+			e.stopPropagation();
+			document.dispatchEvent(new CustomEvent("ch:export-csv"));
+		});
+	}
 }
 
 // ── Public API: Update Floating Info Bar ───────────────
@@ -450,16 +555,41 @@ export function updatePanelProgress(
 	els.statTime.textContent = elapsed;
 	els.statusText.textContent = status;
 
-	// Invert Export Button state
-	if (exportBtnEl) {
-		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
-		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-spin pi-spinner mr-1";
-		
-		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
-		if (label) label.textContent = " STOP Scrape";
-		
-		exportBtnEl.style.backgroundColor = "#ef4444";
-		exportBtnEl.style.borderColor = "#ef4444";
+	// Update button state based on page type
+	if (isWithholdingPage()) {
+		// Withholding page: update single export button
+		if (exportBtnEl) {
+			const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-spin pi-spinner mr-1";
+			
+			const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "STOP Download";
+			
+			exportBtnEl.style.backgroundColor = "#ef4444";
+			exportBtnEl.style.borderColor = "#ef4444";
+		}
+	} else {
+		// Non-withholding page: update XLSX and CSV buttons
+		if (xlsxBtnEl) {
+			const icon = xlsxBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-spin pi-spinner mr-1";
+			
+			const label = xlsxBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = " STOP Scrape";
+			
+			xlsxBtnEl.style.backgroundColor = "#ef4444";
+			xlsxBtnEl.style.borderColor = "#ef4444";
+		}
+		if (csvBtnEl) {
+			const icon = csvBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-spin pi-spinner mr-1";
+			
+			const label = csvBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = " STOP Scrape";
+			
+			csvBtnEl.style.backgroundColor = "#ef4444";
+			csvBtnEl.style.borderColor = "#ef4444";
+		}
 	}
 
 	els.progressBar.style.width = `${Math.min(95, (page * 10) || 5)}%`;
@@ -482,15 +612,40 @@ export function updatePanelComplete(
 		els.statusText.textContent = `✅ ${total} Data Berhasil`;
 	}
 
-	if (exportBtnEl) {
-		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
-		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
-		
-		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
-		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+	if (isWithholdingPage()) {
+		// Restore single export button
+		if (exportBtnEl) {
+			const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+			
+			const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Bulk Download PDF";
 
-		exportBtnEl.style.backgroundColor = "#ff5722";
-		exportBtnEl.style.borderColor = "#ff5722";
+			exportBtnEl.style.backgroundColor = "#ff5722";
+			exportBtnEl.style.borderColor = "#ff5722";
+		}
+	} else {
+		// Restore XLSX and CSV buttons
+		if (xlsxBtnEl) {
+			const icon = xlsxBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file-excel mr-1";
+			
+			const label = xlsxBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export XLSX";
+
+			xlsxBtnEl.style.backgroundColor = "#ff5722";
+			xlsxBtnEl.style.borderColor = "#ff5722";
+		}
+		if (csvBtnEl) {
+			const icon = csvBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file mr-1";
+			
+			const label = csvBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export CSV";
+
+			csvBtnEl.style.backgroundColor = "#ff5722";
+			csvBtnEl.style.borderColor = "#ff5722";
+		}
 	}
 
 	els.progressBar.style.width = "100%";
@@ -501,15 +656,40 @@ export function updatePanelError(message: string): void {
 	statsEl.classList.remove("ch-hidden");
 	els.statusText.textContent = `❌ ${message}`;
 
-	if (exportBtnEl) {
-		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
-		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
-		
-		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
-		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+	if (isWithholdingPage()) {
+		// Restore single export button
+		if (exportBtnEl) {
+			const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+			
+			const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Bulk Download PDF";
 
-		exportBtnEl.style.backgroundColor = "#ff5722";
-		exportBtnEl.style.borderColor = "#ff5722";
+			exportBtnEl.style.backgroundColor = "#ff5722";
+			exportBtnEl.style.borderColor = "#ff5722";
+		}
+	} else {
+		// Restore XLSX and CSV buttons
+		if (xlsxBtnEl) {
+			const icon = xlsxBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file-excel mr-1";
+			
+			const label = xlsxBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export XLSX";
+
+			xlsxBtnEl.style.backgroundColor = "#ff5722";
+			xlsxBtnEl.style.borderColor = "#ff5722";
+		}
+		if (csvBtnEl) {
+			const icon = csvBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file mr-1";
+			
+			const label = csvBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export CSV";
+
+			csvBtnEl.style.backgroundColor = "#ff5722";
+			csvBtnEl.style.borderColor = "#ff5722";
+		}
 	}
 }
 
@@ -517,15 +697,40 @@ export function updatePanelIdle(): void {
 	if (!els || !statsEl) return;
 	statsEl.classList.add("ch-hidden");
 	
-	if (exportBtnEl) {
-		const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
-		if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
-		
-		const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
-		if (label) label.textContent = isWithholdingPage() ? "Bulk Download PDF" : "Better Export";
+	if (isWithholdingPage()) {
+		// Restore single export button
+		if (exportBtnEl) {
+			const icon = exportBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-download mr-1";
+			
+			const label = exportBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Bulk Download PDF";
 
-		exportBtnEl.style.backgroundColor = "#ff5722";
-		exportBtnEl.style.borderColor = "#ff5722";
+			exportBtnEl.style.backgroundColor = "#ff5722";
+			exportBtnEl.style.borderColor = "#ff5722";
+		}
+	} else {
+		// Restore XLSX and CSV buttons
+		if (xlsxBtnEl) {
+			const icon = xlsxBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file-excel mr-1";
+			
+			const label = xlsxBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export XLSX";
+
+			xlsxBtnEl.style.backgroundColor = "#ff5722";
+			xlsxBtnEl.style.borderColor = "#ff5722";
+		}
+		if (csvBtnEl) {
+			const icon = csvBtnEl.querySelector(".p-button-icon") as HTMLElement;
+			if (icon) icon.className = "p-button-icon p-button-icon-left pi pi-file mr-1";
+			
+			const label = csvBtnEl.querySelector(".p-button-label") as HTMLElement;
+			if (label) label.textContent = "Export CSV";
+
+			csvBtnEl.style.backgroundColor = "#ff5722";
+			csvBtnEl.style.borderColor = "#ff5722";
+		}
 	}
 }
 
@@ -534,6 +739,14 @@ export function removeExportButton(): void {
 	if (exportBtnEl) {
 		exportBtnEl.remove();
 		exportBtnEl = null;
+	}
+	if (xlsxBtnEl) {
+		xlsxBtnEl.remove();
+		xlsxBtnEl = null;
+	}
+	if (csvBtnEl) {
+		csvBtnEl.remove();
+		csvBtnEl = null;
 	}
 	const container = document.getElementById("ch-floating-info-container");
 	if (container) container.remove();

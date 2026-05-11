@@ -181,7 +181,7 @@ export function extractFilenameHintFromBody(
 			const value = findFirstFilterValue(filters, ["period", "masa"]);
 			return value ? value.replace(/[^a-zA-Z0-9_-]/g, "") : undefined;
 		}
-	} catch (_) {
+	} catch {
 		return undefined;
 	}
 

@@ -10,14 +10,11 @@ import {
 	extractFilenameHintFromBody,
 	getPageExportSource,
 	inferCapturedSource,
-	isSptPage,
 	isWithholdingPage,
 } from "./page-context";
 
 (() => {
 
-	const PAGE_SIZE = 50;
-	const DELAY_MS = 300;
 	const TIMEOUT = 30000;
 	const MAX_ERRORS = 3;
 
@@ -43,6 +40,9 @@ import {
 		page: number;
 		elapsed: string;
 		status: string;
+		currentIndex?: number;   // 1-based position in bulk download
+		totalCount?: number;     // total items in bulk download
+		failureCount?: number;   // cumulative failures so far
 	}
 
 	interface ScrapeComplete {
@@ -54,6 +54,7 @@ import {
 		elapsed: string;
 		filenameHint?: string;
 		source: ExportSource;
+		failureCount?: number;   // total failures in bulk download
 	}
 
 	interface ScrapeError {
@@ -78,6 +79,7 @@ import {
 
 	window.addEventListener("message", (event: MessageEvent) => {
 		if (event.source !== window) return;
+		if (event.origin !== window.location.origin) return;
 		if (!event.data || event.data.direction !== "FROM_CONTENT") return;
 
 		const msg = event.data;
@@ -140,8 +142,8 @@ import {
 
 	function sendToContent(msg: ScrapeMessage): void {
 		try {
-			window.postMessage({ ...msg, direction: "FROM_PAGE" }, "*");
-		} catch (_) {
+			window.postMessage({ ...msg, direction: "FROM_PAGE" }, window.location.origin);
+		} catch {
 			// Never let messaging errors stop the scraping loop
 		}
 	}
@@ -156,11 +158,33 @@ import {
 	
 	// ── Global Download Interceptor (to prevent double download) ──
 	let isProcessingBetterDownload = false;
+	let processingResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function setProcessingFlag(): void {
+		isProcessingBetterDownload = true;
+		if (processingResetTimer) clearTimeout(processingResetTimer);
+		processingResetTimer = setTimeout(() => {
+			if (isProcessingBetterDownload) {
+				console.warn("[Better Coretax] isProcessingBetterDownload reset by timeout");
+				isProcessingBetterDownload = false;
+			}
+			processingResetTimer = null;
+		}, 5000);
+	}
+
+	function clearProcessingFlag(): void {
+		isProcessingBetterDownload = false;
+		if (processingResetTimer) {
+			clearTimeout(processingResetTimer);
+			processingResetTimer = null;
+		}
+	}
+
 	const origAnchorClick = HTMLAnchorElement.prototype.click;
 	HTMLAnchorElement.prototype.click = function(this: HTMLAnchorElement) {
 		if (isProcessingBetterDownload && (this.download || this.href.startsWith("blob:"))) {
 			console.log("[Better Coretax] Memblokir download klik bawaan.");
-			isProcessingBetterDownload = false; 
+			clearProcessingFlag();
 			return;
 		}
 		return origAnchorClick.apply(this);
@@ -185,32 +209,33 @@ import {
 		return origWindowOpen.apply(window, args);
 	};
 
-	// ── Fetch Interceptor (Backup) ──
+	// ── Fetch Interceptor — sole mechanism for DownloadInvoice/download-invoice-document ──
 	const origFetch = window.fetch;
 	window.fetch = async function(...args: any[]) {
-		const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-		if (url && url.includes("DownloadInvoice/download-invoice-document")) {
-			isProcessingBetterDownload = true;
-			setTimeout(() => { isProcessingBetterDownload = false; }, 5000);
-			
-			const resp = await origFetch.apply(window, args as any);
-			const clonedResp = resp.clone();
-			const json = await clonedResp.json();
-			
-			// Trigger our download
-			window.postMessage({
-				type: "DOWNLOAD_PDF_ITEM",
-				base64: json.Content || json.Payload?.Content || json.Payload?.Message?.Data,
-				item: {}, // Mapping is harder here, but we try
-				source: "OUTPUT_TAX",
-				direction: "FROM_PAGE"
-			}, "*");
-
-			// Return "Empty" response to page to block native download
-			return new Response(JSON.stringify({ IsSuccessful: true, Content: "" }), {
-				status: 200,
-				headers: resp.headers
-			});
+		const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url;
+		if (url?.includes("DownloadInvoice/download-invoice-document")) {
+			setProcessingFlag();
+			try {
+				const resp = await origFetch.apply(window, args as any);
+				const json = await resp.clone().json();
+				const pdfData =
+					json.Content ?? json.Payload?.Content ?? json.Payload?.Message?.Data;
+				if (pdfData) {
+					window.postMessage(
+						{ type: "DOWNLOAD_PDF_ITEM", base64: pdfData, item: {}, source: "OUTPUT_TAX", direction: "FROM_PAGE" },
+						window.location.origin,
+					);
+				}
+				clearProcessingFlag();
+				return new Response(JSON.stringify({ IsSuccessful: true, Content: "" }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			} catch (err) {
+				console.error("[Better Coretax] Fetch interceptor error:", err);
+				clearProcessingFlag();
+				return origFetch.apply(window, args as any);
+			}
 		}
 		return origFetch.apply(window, args as any);
 	};
@@ -223,8 +248,9 @@ import {
 	// ── Message Listener for Filters ───────────────────
 
 	window.addEventListener("message", (event) => {
-		if (event.source !== window || event.data.direction !== "FROM_CONTENT")
-			return;
+		if (event.source !== window) return;
+		if (event.origin !== window.location.origin) return;
+		if (event.data.direction !== "FROM_CONTENT") return;
 		if (event.data.type === "SET_SERVER_FILTER") {
 			const { field, value } = event.data;
 			if (value) {
@@ -261,10 +287,9 @@ import {
 		this: InterceptedXHR,
 		body?: Document | XMLHttpRequestBodyInit | null,
 	) {
-		const xhr = this;
 		let finalBody = body;
 		const pageSource = getPageExportSource();
-		const inferredSource = xhr.__url ? inferCapturedSource(xhr.__url) : null;
+		const inferredSource = this.__url ? inferCapturedSource(this.__url) : null;
 		const isKnownSource = !!inferredSource;
 		let isPaginatedGridRequest = false;
 
@@ -274,7 +299,7 @@ import {
 				isPaginatedGridRequest =
 					parsed.First !== undefined &&
 					parsed.Rows !== undefined;
-			} catch (_) {
+			} catch {
 				isPaginatedGridRequest = false;
 			}
 		}
@@ -291,13 +316,13 @@ import {
 
 				if (Array.isArray(parsed[filterKey])) {
 					// Remove existing "Reference" filter to prevent duplicates
-					parsed[filterKey] = parsed[filterKey].filter((f: any) => f.PropertyName !== "Reference");
+					parsed[filterKey] = parsed[filterKey].filter((f: { PropertyName?: string }) => f.PropertyName !== "Reference");
 					
 					// Inject active filters
 					for (const [field, config] of Object.entries(filterState)) {
 						parsed[filterKey].push({
 							PropertyName: field,
-							Value: config.value,
+							Value: (config as { value: unknown }).value,
 							MatchMode: "contains", 
 							CaseSensitive: false, 
 							AsString: false // Changed to false to try matching native behavior
@@ -313,22 +338,24 @@ import {
 		// 2. Data Inspection & Capture
 		if (isTargetApi) {
 			const currentFinalBody = finalBody;
-			xhr.addEventListener("load", () => {
-				let respData: any = null;
-				try { respData = JSON.parse(xhr.responseText); } catch (_) { }
+			const capturedUrl = this.__url;
+			const capturedHeaders = this.__headers;
+			this.addEventListener("load", () => {
+				let respData: unknown = null;
+				try { respData = JSON.parse((this as XMLHttpRequest).responseText); } catch { }
 
 				const captured: CapturedRequest = {
-					url: xhr.__url || "",
-					headers: { ...(xhr.__headers || {}) },
+					url: capturedUrl || "",
+					headers: { ...(capturedHeaders || {}) },
 					body: null,
 					rawBody: typeof currentFinalBody === "string" ? currentFinalBody : "",
 					response: respData,
-					initialData: Array.isArray(respData?.Payload?.Data) ? respData.Payload.Data : [],
+					initialData: Array.isArray((respData as { Payload?: { Data?: unknown[] } })?.Payload?.Data) ? (respData as { Payload: { Data: Record<string, unknown>[] } }).Payload.Data : [],
 					initialFirst: 0,
 					source: inferredSource || pageSource || "OUTPUT_TAX"
 				};
 
-				if (!Array.isArray(respData?.Payload?.Data)) {
+				if (!Array.isArray((respData as { Payload?: { Data?: unknown[] } })?.Payload?.Data)) {
 					return;
 				}
 
@@ -340,61 +367,6 @@ import {
 				captureSubscribers.length = 0;
 				subs.forEach(s => s(captured));
 			});
-		}
-
-		// 3. Intercept Output Tax PDF Download
-		if (xhr.__url?.includes("DownloadInvoice/download-invoice-document")) {
-			const currentFinalBody = finalBody;
-			
-			// Use readystatechange with capture to be as early as possible
-			xhr.addEventListener("readystatechange", function(this: XMLHttpRequest) {
-				if (this.readyState === 4 && this.status === 200) {
-					try {
-						// Mark that we are handling this download
-						isProcessingBetterDownload = true;
-						// Auto reset flag after 5 seconds
-						setTimeout(() => { isProcessingBetterDownload = false; }, 5000);
-
-						const rawText = this.responseText;
-						const resp = JSON.parse(rawText);
-						const pdfData = resp.Content || resp.Payload?.Content || resp.Payload?.Message?.Data || resp.Payload?.Data;
-						
-						// SABOTAGE DATA & STATUS so the native script thinks it failed or got nothing
-						try {
-							const dummyResp = JSON.stringify({ IsSuccessful: false, Message: "Blocked", Content: "", Payload: null });
-							Object.defineProperty(this, 'responseText', { get: () => dummyResp, configurable: true });
-							Object.defineProperty(this, 'response', { get: () => dummyResp, configurable: true });
-							Object.defineProperty(this, 'status', { get: () => 500, configurable: true });
-							Object.defineProperty(this, 'statusText', { get: () => "Internal Server Error (Blocked by Better Coretax)", configurable: true });
-						} catch (e) { /* ignore defineProperty errors */ }
-
-						if (pdfData && typeof currentFinalBody === "string") {
-							const payload = JSON.parse(currentFinalBody);
-							const recordId = payload.EInvoiceRecordIdentifier;
-							
-							// Try to find matching row in cached data to get Reference
-							let item: any = payload;
-							if (lastCaptured && Array.isArray(lastCaptured.response?.Payload?.Data)) {
-								const found = lastCaptured.response.Payload.Data.find((d: any) => 
-									d.RecordId === recordId || d.EInvoiceRecordIdentifier === recordId
-								);
-								if (found) item = { ...item, ...found };
-							}
-
-							console.log("[Scraper] PDF Terdeteksi & Data Asli dihapus. Mengirim ke Better Coretax...");
-							window.postMessage({
-								type: "DOWNLOAD_PDF_ITEM",
-								base64: pdfData,
-								item: item,
-								source: "OUTPUT_TAX",
-								direction: "FROM_PAGE"
-							}, "*");
-						}
-					} catch (e) {
-						console.error("Better Coretax [Scraper]: Gagal memproses intercept PDF", e);
-					}
-				}
-			}, true);
 		}
 
 		return origSend.call(this, finalBody);
@@ -491,7 +463,7 @@ import {
 							Payload?: { Data?: Record<string, unknown>[] };
 						};
 						resolve(data?.Payload?.Data || []);
-					} catch (_) {
+					} catch {
 						reject(new Error(`Parse error di First=${first}`));
 					}
 				} else {
@@ -535,7 +507,7 @@ import {
 						} else {
 							reject(new Error(res.Message || (res.Payload && res.Payload.Message && res.Payload.Message.ErrorMessage) || "Gagal mengambil konten PDF"));
 						}
-					} catch (_) {
+					} catch {
 						reject(new Error("Parse error saat download PDF"));
 					}
 				} else {
@@ -589,6 +561,7 @@ import {
 			let first = 0;
 			let keepGoing = true;
 			let errorCount = 0;
+			let failureCount = 0;  // Track PDF download failures for bulk operations
 			const startTime = Date.now();
 
 			const isSpt =
@@ -699,6 +672,9 @@ import {
 						page,
 						elapsed: totalElapsed,
 						status: status,
+						currentIndex: i + 1,
+						totalCount: total,
+						failureCount: failureCount,
 					});
 
 					try {
@@ -709,11 +685,12 @@ import {
 							base64: base64,
 							item: row,
 							direction: "FROM_PAGE"
-						}, "*");
+						}, window.location.origin);
 						
 						// Wait a bit between downloads to be safe
 						await delay(800);
 					} catch (err) {
+						failureCount++;
 						console.error(`[Scraper] Gagal unduh PDF idx ${i}:`, err);
 						// Continue to next file even if one fails
 					}
@@ -728,7 +705,8 @@ import {
 				pages: page,
 				elapsed: totalElapsed,
 				filenameHint: filenameHint || undefined,
-				source: captured.source
+				source: captured.source,
+				failureCount: failureCount,
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);

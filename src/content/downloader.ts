@@ -26,14 +26,12 @@ export function downloadBlob(blob: Blob, filename: string): void {
 /**
  * Converts Base64 string to Blob
  */
-export function base64ToBlob(base64: string, mimeType: string = "application/pdf"): Blob {
-	const byteCharacters = atob(base64);
-	const byteNumbers = new Array(byteCharacters.length);
-	for (let i = 0; i < byteCharacters.length; i++) {
-		byteNumbers[i] = byteCharacters.charCodeAt(i);
-	}
-	const byteArray = new Uint8Array(byteNumbers);
-	return new Blob([byteArray], { type: mimeType });
+export function base64ToBlob(base64: string, mimeType = "application/pdf"): Blob {
+	if (!base64) throw new Error("base64ToBlob: input is empty");
+	// atob throws a DOMException on invalid base64 — let it propagate
+	const binary = atob(base64);
+	const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+	return new Blob([bytes], { type: mimeType });
 }
 
 /**
@@ -70,5 +68,22 @@ export function generateOutputTaxFilename(item: any, reference?: string): string
 		.trim();
 
 	return `${ref} - ${invoiceNumber}.pdf`;
+}
+
+/**
+ * Handles a PDF download by converting base64 to Blob, selecting the appropriate
+ * filename generator based on source, and triggering the browser download.
+ */
+export function handlePdfDownload(
+	base64: string,
+	item: Record<string, unknown>,
+	source: string,
+): void {
+	const blob = base64ToBlob(base64);
+	const filename =
+		source === "OUTPUT_TAX"
+			? generateOutputTaxFilename(item as any)
+			: generateWithholdingFilename(item as WithholdingSlip);
+	downloadBlob(blob, filename);
 }
 

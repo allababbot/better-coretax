@@ -25,11 +25,7 @@ function downloadFile(
 	URL.revokeObjectURL(url);
 }
 
-function getDateStamp(): string {
-	return new Date().toISOString().slice(0, 10);
-}
-
-function escapeCSV(value: unknown): string {
+export function escapeCSV(value: unknown): string {
 	if (value == null) return "";
 	const s = String(value);
 	return s.includes(",") || s.includes('"') || s.includes("\n")
@@ -183,27 +179,27 @@ function processData(exportData: ExportData): ExportData {
 	return { data: processedData, fields: hardcodedFields, source: exportData.source };
 }
 
-function generateDynamicFilename(exportData: ExportData): string {
+export const PREFIX_MAP: Record<ExportSource | "default", string> = {
+	OUTPUT_TAX:        "FPK-",
+	INPUT_TAX:         "FPM-",
+	OUTPUT_RETURN:     "RET-FPK-",
+	INPUT_RETURN:      "RET-FPM-",
+	SPT_A2:            "A2-",
+	SPT_B2:            "B2-",
+	PPH_21_L1A:        "PPH21-L1A-",
+	PPH_21_L1B:        "PPH21-L1B-",
+	PPH_21_L2:         "PPH21-L2-",
+	PPH_21_L3:         "PPH21-L3-",
+	WITHHOLDING_SLIPS: "BP-",
+	default:           "FPK-",
+};
+
+export function generateDynamicFilename(exportData: ExportData): string {
 	const { data: originalData, filenameHint, source } = exportData;
 	const isA2 = source === "SPT_A2";
-	const prefix =
-		source === "INPUT_TAX"
-			? "FPM-"
-			: source === "OUTPUT_RETURN"
-				? "RET-FPK-"
-				: source === "INPUT_RETURN"
-					? "RET-FPM-"
-					: isA2
-						? "A2-"
-						: source === "PPH_21_L1A"
-							? "PPH21-L1A-"
-							: source === "PPH_21_L1B"
-								? "PPH21-L1B-"
-								: source === "PPH_21_L2"
-									? "PPH21-L2-"
-									: source === "PPH_21_L3"
-										? "PPH21-L3-"
-										: "FPK-";
+	const prefix = (source && Object.prototype.hasOwnProperty.call(PREFIX_MAP, source))
+		? PREFIX_MAP[source as ExportSource]
+		: PREFIX_MAP["default"];
 
 	const formatPeriod = (p: string) => {
 		// 1. Handle internal format YYYY_MM
@@ -253,7 +249,7 @@ function generateDynamicFilename(exportData: ExportData): string {
 		}
 		
 		// Fallback for PPh 21 if we have any digits
-		if (source.startsWith("PPH_21_") && formatted.length >= 4) {
+		if (source && source.startsWith("PPH_21_") && formatted.length >= 4) {
 			return `${prefix}${formatted}`;
 		}
 	}
