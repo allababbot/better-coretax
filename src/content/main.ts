@@ -178,6 +178,23 @@ window.addEventListener("message", (event: MessageEvent) => {
 			cleanMsg.pages || 0,
 			cleanMsg.elapsed || "0s",
 		);
+
+		// Auto-export if a pending format was requested before scrape started
+		if (pendingExportFormat && scrapedData && scrapedFields) {
+			const exportData: ExportData = {
+				data: scrapedData,
+				fields: scrapedFields,
+				filenameHint: lastExportMeta?.filenameHint,
+				// @ts-ignore
+				source: lastExportMeta?.source,
+			};
+			if (pendingExportFormat === "xlsx") {
+				exportXLSX(exportData);
+			} else {
+				exportCSV(exportData);
+			}
+			pendingExportFormat = null;
+		}
 	}
 
 	if (cleanMsg.type === "DOWNLOAD_PDF_ITEM") {
@@ -243,42 +260,68 @@ document.addEventListener("ch:scrape-toggle", () => {
 		// Stop
 		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, window.location.origin);
 		isRunning = false;
+		pendingExportFormat = null;
 		updatePanelIdle();
 	} else {
 		startScrape();
 	}
 });
 
-// Export XLSX with last scraped data
+// Pending export format: when set, auto-export after scrape completes
+let pendingExportFormat: "xlsx" | "csv" | null = null;
+
+// Export XLSX: if data available, export immediately; otherwise start scrape first
 document.addEventListener("ch:export-xlsx", () => {
-	if (!scrapedData || !scrapedFields) {
-		console.warn("Better Coretax: No scraped data available for XLSX export");
+	if (isRunning) {
+		// Already running — stop it
+		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, window.location.origin);
+		isRunning = false;
+		pendingExportFormat = null;
+		updatePanelIdle();
 		return;
 	}
-	const exportData: ExportData = {
-		data: scrapedData,
-		fields: scrapedFields,
-		filenameHint: lastExportMeta?.filenameHint,
-		// @ts-ignore
-		source: lastExportMeta?.source,
-	};
-	exportXLSX(exportData);
+	if (scrapedData && scrapedFields) {
+		// Data already available — export immediately
+		const exportData: ExportData = {
+			data: scrapedData,
+			fields: scrapedFields,
+			filenameHint: lastExportMeta?.filenameHint,
+			// @ts-ignore
+			source: lastExportMeta?.source,
+		};
+		exportXLSX(exportData);
+	} else {
+		// No data yet — start scrape, then auto-export when done
+		pendingExportFormat = "xlsx";
+		startScrape();
+	}
 });
 
-// Export CSV with last scraped data
+// Export CSV: if data available, export immediately; otherwise start scrape first
 document.addEventListener("ch:export-csv", () => {
-	if (!scrapedData || !scrapedFields) {
-		console.warn("Better Coretax: No scraped data available for CSV export");
+	if (isRunning) {
+		// Already running — stop it
+		window.postMessage({ type: "STOP_SCRAPE", direction: "FROM_CONTENT" }, window.location.origin);
+		isRunning = false;
+		pendingExportFormat = null;
+		updatePanelIdle();
 		return;
 	}
-	const exportData: ExportData = {
-		data: scrapedData,
-		fields: scrapedFields,
-		filenameHint: lastExportMeta?.filenameHint,
-		// @ts-ignore
-		source: lastExportMeta?.source,
-	};
-	exportCSV(exportData);
+	if (scrapedData && scrapedFields) {
+		// Data already available — export immediately
+		const exportData: ExportData = {
+			data: scrapedData,
+			fields: scrapedFields,
+			filenameHint: lastExportMeta?.filenameHint,
+			// @ts-ignore
+			source: lastExportMeta?.source,
+		};
+		exportCSV(exportData);
+	} else {
+		// No data yet — start scrape, then auto-export when done
+		pendingExportFormat = "csv";
+		startScrape();
+	}
 });
 
 // Auto-start scrape (only starts if not already running, never stops)
